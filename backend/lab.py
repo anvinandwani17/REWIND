@@ -8,11 +8,16 @@ adapters and verifier as a live server), then compares what actually happened
 with what it expects. Exit code 1 if any outcome differs. Scenarios that
 deliberately break something (tampering with SQLite, a broken policy file) are
 labelled injected_fault. Your real database is never touched.
+
+The CLI saves the run to backend/data/lab_last_run.json (or
+REWIND_LAB_RESULTS_PATH) for GET /api/metrics.
 """
+import json
 import os
 import sys
 import tempfile
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -20,6 +25,7 @@ from fastapi.testclient import TestClient
 import db
 import demo
 import main
+import metrics
 import verification
 
 OPERATOR = {"X-Role": "operator", "X-Role-Key": "demo-operator-key"}
@@ -209,7 +215,21 @@ def print_table(results):
     print(f"\n{passed}/{len(results)} scenarios behaved as expected")
 
 
+def save_results(results, path, name_filter=None):
+    """Write the run for GET /api/metrics. Only the CLI calls this; tests don't."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "ran_at": datetime.now(timezone.utc).isoformat(),
+        "filter": name_filter,
+        "scenarios": results,
+    }, indent=2), encoding="utf-8")
+
+
 if __name__ == "__main__":
-    lab_results = run_all(sys.argv[1] if len(sys.argv) > 1 else None)
+    selected = sys.argv[1] if len(sys.argv) > 1 else None
+    lab_results = run_all(selected)
     print_table(lab_results)
+    save_results(lab_results, metrics.lab_results_path(), selected)
+    print(f"Saved to {metrics.lab_results_path()}")
     sys.exit(0 if lab_results and all(r["ok"] for r in lab_results) else 1)

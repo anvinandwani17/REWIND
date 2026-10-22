@@ -28,7 +28,7 @@ Send `X-Role` and `X-Role-Key` on every write. This is a demo role gate, **not**
 
 | Role | May call |
 |---|---|
-| (none) | `GET /api/customers`, `GET /api/credit-lines`, `GET /api/actions`, `GET /api/actions/{action_id}` |
+| (none) | `GET /api/customers`, `GET /api/credit-lines`, `GET /api/actions`, `GET /api/actions/{action_id}`, `GET /api/metrics` |
 | `operator` | `POST /api/tools/update-customer-status`, `POST /api/tools/update-credit-limit`, `POST /api/actions/{action_id}/undo`, `POST /api/demo/reset`, `POST /api/agent/runs` |
 | `approver` | `POST /api/actions/{action_id}/approve`, `POST /api/actions/{action_id}/reject` |
 | `auditor` | `GET /api/audit/export` |
@@ -117,6 +117,7 @@ Read on every request. If the file is missing, invalid YAML, or has the wrong ke
 | `POST /api/tools/update-credit-limit` | 202 | — | Large increase waits for approval |
 | `POST /api/tools/update-credit-limit` | 404 | `credit_line_not_found` | No credit line for the account |
 | `GET /api/actions` | 200 | — | List actions |
+| `GET /api/metrics` | 200 | — | Metrics (no saved lab run) |
 | `POST /api/agent/runs` | 501 | `not_implemented` | Reserved: start an agent run |
 | `GET /api/runs/run-1/evidence` | 501 | `not_implemented` | Reserved: run evidence |
 | `GET /api/nope` | 404 | `route_not_found` | Unknown route |
@@ -845,7 +846,7 @@ Response `200`:
 {
   "data": {
     "id": "00000000-0000-4000-8000-000000000012",
-    "created_at": "2026-10-22T12:00:12+00:00",
+    "created_at": "2026-10-22T12:00:14+00:00",
     "actor": "operator",
     "tool_name": "update_customer_status",
     "arguments": {
@@ -931,7 +932,7 @@ Response `200`:
     "approval": {
       "decision": "approved",
       "role": "approver",
-      "at": "2026-10-22T12:00:13+00:00",
+      "at": "2026-10-22T12:00:15+00:00",
       "note": "Checked the account history"
     },
     "recovered_at": null,
@@ -987,7 +988,7 @@ Response `200`:
 {
   "data": {
     "id": "00000000-0000-4000-8000-000000000013",
-    "created_at": "2026-10-22T12:00:14+00:00",
+    "created_at": "2026-10-22T12:00:16+00:00",
     "actor": "operator",
     "tool_name": "update_customer_status",
     "arguments": {
@@ -1033,7 +1034,7 @@ Response `200`:
     "approval": {
       "decision": "rejected",
       "role": "approver",
-      "at": "2026-10-22T12:00:15+00:00",
+      "at": "2026-10-22T12:00:17+00:00",
       "note": "Not this week"
     },
     "recovered_at": null,
@@ -1061,7 +1062,7 @@ Response `200`:
 ```json
 {
   "data": {
-    "exported_at": "2026-10-22T12:00:16+00:00",
+    "exported_at": "2026-10-22T12:00:18+00:00",
     "exported_by_role": "auditor",
     "pii_masked": true,
     "integrity_check": "ok",
@@ -1104,10 +1105,10 @@ Response `200`:
         "approval": {
           "decision": "rejected",
           "role": "approver",
-          "at": "2026-10-22T12:00:15+00:00",
+          "at": "2026-10-22T12:00:17+00:00",
           "note": "Not this week"
         },
-        "created_at": "2026-10-22T12:00:14+00:00",
+        "created_at": "2026-10-22T12:00:16+00:00",
         "recovered_at": null,
         "actor": "operator",
         "decision": "require_approval",
@@ -1454,7 +1455,8 @@ Response `200`:
           },
           "passed": true
         }
-      ]
+      ],
+      "checked_at": "2026-10-22T12:00:22+00:00"
     }
   },
   "error": null
@@ -1603,7 +1605,7 @@ Response `200`:
   "data": [
     {
       "id": "00000000-0000-4000-8000-000000000018",
-      "created_at": "2026-10-22T12:00:22+00:00",
+      "created_at": "2026-10-22T12:00:25+00:00",
       "actor": "operator",
       "tool_name": "update_credit_limit",
       "arguments": {
@@ -1760,7 +1762,7 @@ Response `200`:
 {
   "data": {
     "id": "00000000-0000-4000-8000-000000000008",
-    "created_at": "2026-10-22T12:00:08+00:00",
+    "created_at": "2026-10-22T12:00:09+00:00",
     "actor": "operator",
     "tool_name": "update_customer_status",
     "arguments": {
@@ -1949,7 +1951,8 @@ Response `200`:
           },
           "passed": true
         }
-      ]
+      ],
+      "checked_at": "2026-10-22T12:00:04+00:00"
     }
   },
   "error": null
@@ -2051,7 +2054,8 @@ Response `200`:
           },
           "passed": true
         }
-      ]
+      ],
+      "checked_at": "2026-10-22T12:00:04+00:00"
     }
   },
   "error": null
@@ -2151,7 +2155,8 @@ Response `409`:
           "actual": "ok",
           "passed": true
         }
-      ]
+      ],
+      "checked_at": "2026-10-22T12:00:12+00:00"
     }
   },
   "error": {
@@ -2221,6 +2226,76 @@ Response `404`:
 }
 ```
 
+### `GET /api/metrics`
+
+Measured from the ledger and the last saved lab run (`python backend/lab.py` writes `backend/data/lab_last_run.json`). Values that cannot be measured are `null`. `assumptions` lists every definition used; read it before quoting a number. `false_verified.count` must be 0.
+
+#### Metrics (no saved lab run)
+
+Timings in this example come from the docs' fixed clock (one second per ledger write), not from real elapsed time.
+
+```http
+GET /api/metrics
+```
+
+Response `200`:
+
+```json
+{
+  "data": {
+    "measured_at": "2026-10-22T12:00:26+00:00",
+    "actions": {
+      "total": 14,
+      "executed": 6,
+      "blocked": 4,
+      "flagged": 3,
+      "by_status": {
+        "blocked": 4,
+        "denied": 1,
+        "executed": 6,
+        "pending_approval": 1,
+        "rejected": 2
+      }
+    },
+    "recoveries": {
+      "total": 3,
+      "verified": 2,
+      "conflict_detected": 1,
+      "failed": 0,
+      "manual_review_required": 0,
+      "unverified": 0
+    },
+    "time_to_verified_recovery_seconds": {
+      "samples": 2,
+      "median": 2.0,
+      "max": 2.0,
+      "excluded_no_timestamp": 0
+    },
+    "false_verified": {
+      "count": 0,
+      "ledger": 0,
+      "lab": null
+    },
+    "lab": {
+      "available": false,
+      "path": "no-lab-run-saved\\lab_last_run.json"
+    },
+    "assumptions": [
+      "actions.* counts forward actions only (every ledger row whose tool is not 'undo'); actions.by_status has the full breakdown.",
+      "actions.executed = status 'executed' (includes approved-then-executed); actions.blocked = status 'blocked' (policy blocks).",
+      "actions.flagged = forward actions for which at least one Undo was requested. The ledger has no separate 'flag' event, so requesting Undo is treated as flagging the action as wrong. Flagged overlaps executed.",
+      "recoveries.* counts every Undo attempt row by its stored post-commit verdict; 'unverified' means no verdict was stored.",
+      "time_to_verified_recovery: from the first Undo attempt on an action (its ledger created_at) to verification.checked_at of the attempt whose stored verdict is 'verified'. Recoveries without a stored checked_at (older rows) are counted in excluded_no_timestamp, not estimated.",
+      "false_verified.ledger = Undo rows whose stored verdict is 'verified' but whose own evidence does not support it (a required check missing, any check not passed, expected != actual, or stage not post_commit). It checks the stored evidence; it does not re-read current data.",
+      "false_verified.lab = scenarios in the last saved lab run whose actual outcome says 'verified' when the expected outcome does not. null when no lab run is saved.",
+      "false_verified.count = ledger + lab (lab counted only when a lab run is saved). It must be 0.",
+      "lab.* comes from the file the lab CLI writes (python backend/lab.py), not from this database."
+    ]
+  },
+  "error": null
+}
+```
+
 ### Reserved (not implemented yet)
 
 #### Reserved: start an agent run
@@ -2284,9 +2359,8 @@ Response `404`:
 }
 ```
 
-## Changes since the last version (governance)
+## Changes since the last version (credit-limit adapter)
 
-- New recovery adapter: credit limits. New routes `GET /api/credit-lines` and `POST /api/tools/update-credit-limit` (operator); rules from `backend/policies.yaml`.
-- `POST /api/demo/reset` response gains `credit_lines`.
-- New `tool_name` value `update_credit_limit`; new rule ids `policy_config_invalid`, `limit_out_of_range`, `approval_threshold`, `large_increase`; new error code `credit_line_not_found`.
-- Customer-status responses are unchanged.
+- New route `GET /api/metrics` (open read).
+- Post-commit `verification` objects (Undo) gain `checked_at`: when the verdict was reached.
+- The lab CLI saves its last run for `/api/metrics`.

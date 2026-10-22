@@ -13,6 +13,7 @@ import db
 import demo
 import gateway
 import ledger
+import metrics
 import privacy
 import recovery
 import roles
@@ -93,6 +94,12 @@ def list_customers():
 def list_credit_lines():
     with db.connect() as conn:
         return envelope(db.list_credit_lines(conn))
+
+
+@app.get("/api/metrics")
+def get_metrics():
+    with db.connect() as conn:
+        return envelope(metrics.compute(conn))
 
 
 @app.get("/api/actions", response_model=Envelope[list[ActionRecord]])

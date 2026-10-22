@@ -24,6 +24,8 @@ REGENERATE = os.environ.get("REWIND_REGENERATE") == "1"
 def examples(tmp_path, monkeypatch):
     monkeypatch.setenv("REWIND_DB_PATH", str(tmp_path / "contract.db"))
     monkeypatch.setenv("REWIND_DEMO_MODE", "1")
+    # Fixed, never-created path so the generated docs don't depend on a local lab run.
+    monkeypatch.setenv("REWIND_LAB_RESULTS_PATH", "no-lab-run-saved/lab_last_run.json")
     for name in ("REWIND_RECENT_ACTIVITY_DAYS", "REWIND_BULK_APPROVAL_THRESHOLD",
                  "REWIND_FAULT_DISABLE_RECENT_ACTIVITY"):
         monkeypatch.delenv(name, raising=False)
@@ -97,6 +99,7 @@ def test_documented_status_codes(examples):
         "credit_pending": (202, None),
         "credit_not_found": (404, "credit_line_not_found"),
         "actions": (200, None),
+        "metrics": (200, None),
         "agent_runs_reserved": (501, "not_implemented"),
         "run_evidence_reserved": (501, "not_implemented"),
         "route_not_found": (404, "route_not_found"),

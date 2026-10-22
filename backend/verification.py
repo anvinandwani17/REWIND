@@ -13,6 +13,7 @@ A check is only listed when the code compared real evidence. A verdict is
 "verified" only when every listed check passed and no required evidence was
 missing.
 """
+import ledger
 from db import connect, transaction
 from ledger import get_action, store_undo_verification
 
@@ -235,6 +236,8 @@ def verify_undo(undo_action_id):
                              f"No adapter supports {original['tool_name']!r}; nothing was checked.", [])
         else:
             result = adapter.verify(db, attempt, original)
+    # When this verdict was reached (used by GET /api/metrics for time-to-recovery).
+    result["checked_at"] = ledger.now()
 
     with transaction() as db:
         store_undo_verification(db, undo_action_id, original_id, result)

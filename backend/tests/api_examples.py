@@ -134,6 +134,7 @@ def run_examples(client, monkeypatch):
          credit("ACC-107", 10000, "Open a line"))
 
     call("actions", "List actions", "GET", "/api/actions")
+    call("metrics", "Metrics (no saved lab run)", "GET", "/api/metrics")
     call("agent_runs_reserved", "Reserved: start an agent run", "POST", "/api/agent/runs")
     call("run_evidence_reserved", "Reserved: run evidence", "GET", "/api/runs/run-1/evidence")
     call("route_not_found", "Unknown route", "GET", "/api/nope")
@@ -253,7 +254,7 @@ def render(examples):
         "| Role | May call |",
         "|---|---|",
         "| (none) | `GET /api/customers`, `GET /api/credit-lines`, `GET /api/actions`, "
-        "`GET /api/actions/{action_id}` |",
+        "`GET /api/actions/{action_id}`, `GET /api/metrics` |",
         "| `operator` | `POST /api/tools/update-customer-status`, `POST /api/tools/update-credit-limit`, "
         "`POST /api/actions/{action_id}/undo`, "
         "`POST /api/demo/reset`, `POST /api/agent/runs` |",
@@ -401,6 +402,15 @@ def render(examples):
         _example(by_id["undo_conflict"]),
         _example(by_id["undo_not_undoable"]),
         _example(by_id["undo_not_found"]),
+        "### `GET /api/metrics`",
+        "",
+        "Measured from the ledger and the last saved lab run (`python backend/lab.py` writes "
+        "`backend/data/lab_last_run.json`). Values that cannot be measured are `null`. "
+        "`assumptions` lists every definition used; read it before quoting a number. "
+        "`false_verified.count` must be 0.",
+        "",
+        _example(by_id["metrics"], "Timings in this example come from the docs' fixed clock (one second "
+                                   "per ledger write), not from real elapsed time."),
         "### Reserved (not implemented yet)",
         "",
         _example(by_id["agent_runs_reserved"]),
@@ -408,15 +418,11 @@ def render(examples):
         "### Any unknown route",
         "",
         _example(by_id["route_not_found"]),
-        "## Changes since the last version (governance)",
+        "## Changes since the last version (credit-limit adapter)",
         "",
-        "- New recovery adapter: credit limits. New routes `GET /api/credit-lines` and "
-        "`POST /api/tools/update-credit-limit` (operator); rules from `backend/policies.yaml`.",
-        "- `POST /api/demo/reset` response gains `credit_lines`.",
-        "- New `tool_name` value `update_credit_limit`; new rule ids `policy_config_invalid`, "
-        "`limit_out_of_range`, `approval_threshold`, `large_increase`; new error code "
-        "`credit_line_not_found`.",
-        "- Customer-status responses are unchanged.",
+        "- New route `GET /api/metrics` (open read).",
+        "- Post-commit `verification` objects (Undo) gain `checked_at`: when the verdict was reached.",
+        "- The lab CLI saves its last run for `/api/metrics`.",
         "",
     ]
     return "\n".join(sections)

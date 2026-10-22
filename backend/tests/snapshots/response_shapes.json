@@ -472,6 +472,7 @@
         "status": "str",
         "undo_action_id": "str",
         "verification": {
+          "checked_at": "str",
           "checks": [
             {
               "actual": "int",
@@ -545,6 +546,54 @@
           "version": "int"
         }
       ],
+      "error": "null"
+    },
+    "status": 200
+  },
+  "metrics": {
+    "shape": {
+      "data": {
+        "actions": {
+          "blocked": "int",
+          "by_status": {
+            "blocked": "int",
+            "denied": "int",
+            "executed": "int",
+            "pending_approval": "int",
+            "rejected": "int"
+          },
+          "executed": "int",
+          "flagged": "int",
+          "total": "int"
+        },
+        "assumptions": [
+          "str"
+        ],
+        "false_verified": {
+          "count": "int",
+          "lab": "null",
+          "ledger": "int"
+        },
+        "lab": {
+          "available": "bool",
+          "path": "str"
+        },
+        "measured_at": "str",
+        "recoveries": {
+          "conflict_detected": "int",
+          "failed": "int",
+          "manual_review_required": "int",
+          "total": "int",
+          "unverified": "int",
+          "verified": "int"
+        },
+        "time_to_verified_recovery_seconds": {
+          "excluded_no_timestamp": "int",
+          "max": "float",
+          "median": "float",
+          "samples": "int"
+        }
+      },
       "error": "null"
     },
     "status": 200
@@ -726,6 +775,7 @@
         "status": "str",
         "undo_action_id": "str",
         "verification": {
+          "checked_at": "str",
           "checks": [
             {
               "actual": {
@@ -817,6 +867,7 @@
         "status": "str",
         "undo_action_id": "str",
         "verification": {
+          "checked_at": "str",
           "checks": [
             {
               "actual": "str",
@@ -861,6 +912,7 @@
         "status": "str",
         "undo_action_id": "str",
         "verification": {
+          "checked_at": "str",
           "checks": [
             {
               "actual": "str",
