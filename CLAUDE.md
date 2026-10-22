@@ -17,7 +17,7 @@ A flight recorder and safe-recovery layer for supported AI-agent tool actions. D
 - A customer mutation and its ledger row commit in the same SQLite transaction. Use BEGIN IMMEDIATE for write paths that check-then-write.
 - Customer rows carry an integer `version` that increments on every change (including recovery).
 - The verifier is deterministic code that re-reads SQLite. It never calls the LLM and never trusts agent output.
-- Never claim universal rollback. This adapter supports customer status changes only.
+- Never claim universal rollback. Undo supports only what the adapters in backend/adapters.py implement: customer status and credit limits.
 - Honesty rules: replay mode is always labelled `mode: "replay"`, never presented as a live model run. Injected faults are labelled `scenario: "injected_fault"`. Never report a check as passed unless code actually compared the evidence.
 - Secrets, .env, *.db, .venv stay out of Git. Importing the app must never wipe data; only POST /api/demo/reset does.
 
