@@ -89,6 +89,12 @@ def list_customers():
         return envelope(db.list_customers(conn))
 
 
+@app.get("/api/credit-lines")
+def list_credit_lines():
+    with db.connect() as conn:
+        return envelope(db.list_credit_lines(conn))
+
+
 @app.get("/api/actions", response_model=Envelope[list[ActionRecord]])
 def list_actions():
     with db.connect() as conn:
@@ -102,12 +108,21 @@ def get_action(action_id: str):
 
 # --- operator ------------------------------------------------------------------------
 
-@app.post("/api/tools/update-customer-status")
-def update_customer_status(body: dict[str, Any] = Body(...), role: str = operator):
+def run_tool(tool_name, body, role):
     # Validation happens once, inside the gateway.
     arguments = dict(body)
     run_id = arguments.pop("run_id", None)
-    return respond(gateway.execute("update_customer_status", arguments, run_id=run_id, actor=role))
+    return respond(gateway.execute(tool_name, arguments, run_id=run_id, actor=role))
+
+
+@app.post("/api/tools/update-customer-status")
+def update_customer_status(body: dict[str, Any] = Body(...), role: str = operator):
+    return run_tool("update_customer_status", body, role)
+
+
+@app.post("/api/tools/update-credit-limit")
+def update_credit_limit(body: dict[str, Any] = Body(...), role: str = operator):
+    return run_tool("update_credit_limit", body, role)
 
 
 @app.post("/api/actions/{action_id}/undo")

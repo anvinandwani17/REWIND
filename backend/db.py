@@ -20,11 +20,18 @@ CREATE TABLE IF NOT EXISTS customers (
     version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1)
 );
 
+CREATE TABLE IF NOT EXISTS credit_lines (
+    account_id TEXT PRIMARY KEY REFERENCES customers(account_id),
+    credit_limit INTEGER NOT NULL CHECK (credit_limit >= 0),   -- whole INR
+    currency TEXT NOT NULL DEFAULT 'INR',
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1)
+);
+
 CREATE TABLE IF NOT EXISTS actions (
     action_id TEXT PRIMARY KEY,
     created_at TEXT NOT NULL,
     actor TEXT NOT NULL,                         -- operator | agent | ops_user | system
-    tool TEXT NOT NULL,                          -- update_customer_status | undo
+    tool TEXT NOT NULL,                          -- update_customer_status | update_credit_limit | undo
     args_json TEXT NOT NULL,
     decision TEXT NOT NULL
         CHECK (decision IN ('allow', 'block', 'require_approval', 'reject')),
@@ -120,12 +127,16 @@ def list_customers(db):
     return [customer_dict(row) for row in rows]
 
 
-def other_customers(db, account_id):
-    rows = db.execute(
-        "SELECT * FROM customers WHERE account_id != ? ORDER BY account_id",
-        (account_id,),
-    ).fetchall()
-    return [customer_dict(row) for row in rows]
+def list_credit_lines(db):
+    return [dict(row) for row in db.execute("SELECT * FROM credit_lines ORDER BY account_id")]
+
+
+def insert_credit_lines(db, credit_lines):
+    db.executemany(
+        """INSERT INTO credit_lines (account_id, credit_limit, currency, version)
+           VALUES (:account_id, :credit_limit, 'INR', 1)""",
+        credit_lines,
+    )
 
 
 def insert_customers(db, customers):

@@ -4,17 +4,13 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
-import demo
+import adapters
 import policies
 import privacy
 import verification
-from db import get_customer, list_customers, transaction
-from ledger import (
-    count_executed_in_run, deny_pending, get_action, now, record_action, resolve_pending,
-)
-from schemas import UpdateCustomerStatusArgs, envelope, error_body, error_obj
-
-SUPPORTED_TOOLS = {"update_customer_status": UpdateCustomerStatusArgs}
+from db import list_customers, transaction
+from ledger import deny_pending, get_action, now, record_action, resolve_pending
+from schemas import envelope, error_body, error_obj
 
 
 def _not_pending(action_id, action):
@@ -41,12 +37,13 @@ def execute(tool_name, arguments, run_id=None, actor="api", approves=None, appro
     Returns (http_status, {data, error}). Non-2xx always carries an error;
     outcomes that were recorded (blocked, failed) also carry their data.
     """
-    if tool_name not in SUPPORTED_TOOLS:
+    adapter = adapters.for_tool(tool_name)
+    if adapter is None:
         return 400, error_body("unsupported_tool", f"Unsupported tool: {tool_name}")
     if run_id is not None and not isinstance(run_id, str):
         return 422, error_body("invalid_arguments", "run_id must be a string")
     try:
-        args = SUPPORTED_TOOLS[tool_name].model_validate(arguments)
+        args = adapter.args_model.model_validate(arguments)
     except ValidationError as exc:
         # Nothing is written: malformed input cannot be trusted enough to log
         # against an account.
@@ -57,6 +54,8 @@ def execute(tool_name, arguments, run_id=None, actor="api", approves=None, appro
 
     settings = policies.settings()
     action_id = approves or str(uuid4())
+    target_id, new_value = adapter.target_id(args), adapter.new_value(args)
+    title = adapter.title_noun
 
     with transaction() as db:
         names = [c["name"] for c in list_customers(db)]
@@ -64,7 +63,7 @@ def execute(tool_name, arguments, run_id=None, actor="api", approves=None, appro
             "action_id": action_id, "run_id": run_id, "tool": tool_name,
             # Free-text args (reason) are stored with customer names/phones masked.
             "args": privacy.mask_args(args.model_dump(), names), "actor": actor,
-            "scenario": "injected_fault" if settings["recent_activity_disabled"] else None,
+            "scenario": adapter.scenario(settings),
         }
 
         pending = None
@@ -73,33 +72,28 @@ def execute(tool_name, arguments, run_id=None, actor="api", approves=None, appro
             if pending is None or pending["status"] != "pending_approval":
                 return _not_pending(approves, pending)
 
-        before = get_customer(db, args.account_id)
+        before = adapter.snapshot(db, target_id)
         if pending is not None and before != pending["before"]:
             # Nothing written; the request stays pending so an approver can reject it.
             return 409, error_body(
                 "approval_stale",
-                "Customer changed since approval was requested; reject and re-request",
-                {"requested_before": pending["before"], "current_customer": before},
+                f"{title} changed since approval was requested; reject and re-request",
+                {"requested_before": pending["before"], f"current_{adapter.entity}": before},
             )
 
         if before is None:
-            message = "Customer not found"
+            message = f"{title} not found"
             record_action(
                 db, **common, before=None, after=None, decision="reject",
                 rule_id="account_not_found", reason=message, risk="low",
                 status="rejected", recovery_state="unavailable", verification=None,
             )
             return 404, error_body(
-                "customer_not_found", message,
-                {"account_id": args.account_id, "action_id": action_id},
+                f"{adapter.entity}_not_found", message,
+                {adapter.key: target_id, "action_id": action_id},
             )
 
-        decision = policies.evaluate(
-            before, args.new_status,
-            now=demo.clock(),
-            run_executed_count=count_executed_in_run(db, run_id),
-            settings=settings,
-        )
+        decision = adapter.evaluate(db, before, new_value, run_id=run_id, settings=settings)
         if pending is not None and decision["decision"] == "require_approval":
             decision = {**decision, "decision": "allow",
                         "reason": f"Approved by {actor}: {decision['reason']}"}
@@ -137,31 +131,22 @@ def execute(tool_name, arguments, run_id=None, actor="api", approves=None, appro
         if args.expected_version is not None and args.expected_version != before["version"]:
             # Nothing written: the caller acted on a stale read.
             return 409, error_body(
-                "version_conflict", "Customer changed since it was read",
+                "version_conflict", f"{title} changed since it was read",
                 {"expected_version": args.expected_version,
                  "current_version": before["version"]},
             )
 
-        others_before = verification.snapshot_other_customers(db, args.account_id)
+        others_before = adapter.snapshot_unrelated(db, target_id)
         db.execute("SAVEPOINT write")
-        cursor = db.execute(
-            """
-            UPDATE customers
-            SET status = ?, version = version + 1
-            WHERE account_id = ? AND version = ?
-            """,
-            (args.new_status, args.account_id, before["version"]),
-        )
-        result = verification.guard_update(
-            db, before, args.new_status, others_before, cursor.rowcount
-        )
+        rowcount = adapter.apply(db, before, new_value)
+        result = verification.guard_update(adapter, db, before, new_value, others_before, rowcount)
         # Never "executed" unless exactly one row changed and every guard check passed.
         executed = result["verdict"] == "verified"
         if not executed:
             db.execute("ROLLBACK TO write")
         db.execute("RELEASE write")
 
-        after = get_customer(db, args.account_id)
+        after = adapter.snapshot(db, target_id)
         status, recovery_state = (
             ("executed", "available") if executed else ("failed", "unavailable")
         )

@@ -15,6 +15,7 @@ import ledger
 import recovery
 
 UPDATE = "/api/tools/update-customer-status"
+CREDIT = "/api/tools/update-credit-limit"
 ROLE_HEADERS = {
     role: {"X-Role": role, "X-Role-Key": f"demo-{role}-key"}
     for role in ("operator", "approver", "auditor")
@@ -117,6 +118,21 @@ def run_examples(client, monkeypatch):
     call("audit_export", "Export the audit trail", "GET", "/api/audit/export", role="auditor")
     call("audit_export_forbidden", "Export as an operator", "GET", "/api/audit/export", role="operator")
 
+    def credit(account_id, new_limit, reason):
+        return {"account_id": account_id, "new_limit": new_limit, "reason": reason}
+
+    call("credit_lines", "List credit lines", "GET", "/api/credit-lines")
+    credit_change = call("credit_update_executed", "Raise a credit limit", "POST", CREDIT,
+                         credit("ACC-104", 100000, "Six months of on-time payments"))
+    call("credit_undo", "Undo the credit-limit change", "POST",
+         f"/api/actions/{credit_change['data']['action_id']}/undo")
+    call("credit_blocked", "Blocked: above max_limit", "POST", CREDIT,
+         credit("ACC-104", 600000, "Requested by branch"))
+    call("credit_pending", "Large increase waits for approval", "POST", CREDIT,
+         credit("ACC-105", 60000, "Seasonal stock purchase"))
+    call("credit_not_found", "No credit line for the account", "POST", CREDIT,
+         credit("ACC-107", 10000, "Open a line"))
+
     call("actions", "List actions", "GET", "/api/actions")
     call("agent_runs_reserved", "Reserved: start an agent run", "POST", "/api/agent/runs")
     call("run_evidence_reserved", "Reserved: run evidence", "GET", "/api/runs/run-1/evidence")
@@ -203,7 +219,9 @@ def render(examples):
         "Do not edit by hand: run `$env:REWIND_REGENERATE = \"1\"; python -m pytest -q` "
         "then remove the variable. -->",
         "",
-        "Scope: Undo supports **customer status changes only**. This is not a universal rollback.",
+        "Scope: there is **no universal rollback**. Undo supports exactly the changes a recovery "
+        "adapter implements (`backend/adapters.py`): customer status (`update_customer_status`) and "
+        "credit limits (`update_credit_limit`).",
         "",
         "```powershell",
         '$env:REWIND_DEMO_MODE = "1"; Set-Location backend; uvicorn main:app --reload',
@@ -234,8 +252,10 @@ def render(examples):
         "",
         "| Role | May call |",
         "|---|---|",
-        "| (none) | `GET /api/customers`, `GET /api/actions`, `GET /api/actions/{action_id}` |",
-        "| `operator` | `POST /api/tools/update-customer-status`, `POST /api/actions/{action_id}/undo`, "
+        "| (none) | `GET /api/customers`, `GET /api/credit-lines`, `GET /api/actions`, "
+        "`GET /api/actions/{action_id}` |",
+        "| `operator` | `POST /api/tools/update-customer-status`, `POST /api/tools/update-credit-limit`, "
+        "`POST /api/actions/{action_id}/undo`, "
         "`POST /api/demo/reset`, `POST /api/agent/runs` |",
         "| `approver` | `POST /api/actions/{action_id}/approve`, `POST /api/actions/{action_id}/reject` |",
         "| `auditor` | `GET /api/audit/export` |",
@@ -243,6 +263,22 @@ def render(examples):
         "Each write route allows exactly one role. Missing/bad headers → 401 (`role_required`, "
         "`invalid_role_key`); a valid role on the wrong route → 403 `role_forbidden`. Nothing is written "
         "in either case.",
+        "",
+        "## Credit-limit policy (`backend/policies.yaml`)",
+        "",
+        "Read on every request. If the file is missing, invalid YAML, or has the wrong keys, **every** "
+        "credit-limit change is blocked with `rule_id: policy_config_invalid` (fails closed). "
+        "Rules, in order:",
+        "",
+        "| `rule_id` | Outcome | When |",
+        "|---|---|---|",
+        "| `policy_config_invalid` | 403 blocked | policies.yaml cannot be loaded |",
+        "| `protected_customer` | 403 blocked | the owning customer is protected and `block_protected_customers` |",
+        "| `no_change` | 409 blocked | new limit equals the current limit |",
+        "| `limit_out_of_range` | 403 blocked | outside `min_limit`..`max_limit` |",
+        "| `approval_threshold` | 202 pending | new limit above `approval_above` |",
+        "| `large_increase` | 202 pending | increase above `approval_increase_pct` % of the current limit |",
+        "| `default_allow` | 200 executed | otherwise |",
         "",
         "## Approvals",
         "",
@@ -336,6 +372,20 @@ def render(examples):
         "",
         _example(by_id["update_role_missing"]),
         _example(by_id["update_role_forbidden"]),
+        "### `GET /api/credit-lines`",
+        "",
+        _example(by_id["credit_lines"]),
+        "### `POST /api/tools/update-credit-limit` (operator)",
+        "",
+        "Body: `account_id`, `new_limit` (whole INR, 0..1,000,000,000), `reason` (required), optional "
+        "`expected_version`, optional `run_id`. Approve, reject and Undo work exactly as for status "
+        "changes; Undo evidence uses `current_credit_line` / `other_credit_lines`.",
+        "",
+        _example(by_id["credit_update_executed"]),
+        _example(by_id["credit_undo"]),
+        _example(by_id["credit_blocked"]),
+        _example(by_id["credit_pending"]),
+        _example(by_id["credit_not_found"]),
         "### `GET /api/actions`",
         "",
         _example(trimmed, f"The real response had {count} items; only the first (newest) is shown."),
@@ -358,16 +408,15 @@ def render(examples):
         "### Any unknown route",
         "",
         _example(by_id["route_not_found"]),
-        "## Changes since the last version (Priority-0 item 5)",
+        "## Changes since the last version (governance)",
         "",
-        "- **Breaking:** every write needs `X-Role` + `X-Role-Key` (see Roles). Reads are unchanged.",
-        "- **Breaking:** `actor` on ledger rows is now the role (`operator`, `approver`) instead of `api`.",
-        "- New: `POST /api/actions/{action_id}/approve`, `POST /api/actions/{action_id}/reject`, "
-        "`GET /api/audit/export`.",
-        "- New ledger status `denied`; ActionRecord gains `approval`.",
-        "- Customers gain `phone` (synthetic). Ledger `arguments.reason` is stored with names/phones masked.",
-        "- CORS also allows the `X-Role` and `X-Role-Key` headers.",
-        "- Local DBs from before this change need one `POST /api/demo/reset` (as operator).",
+        "- New recovery adapter: credit limits. New routes `GET /api/credit-lines` and "
+        "`POST /api/tools/update-credit-limit` (operator); rules from `backend/policies.yaml`.",
+        "- `POST /api/demo/reset` response gains `credit_lines`.",
+        "- New `tool_name` value `update_credit_limit`; new rule ids `policy_config_invalid`, "
+        "`limit_out_of_range`, `approval_threshold`, `large_increase`; new error code "
+        "`credit_line_not_found`.",
+        "- Customer-status responses are unchanged.",
         "",
     ]
     return "\n".join(sections)

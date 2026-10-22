@@ -1,44 +1,47 @@
-"""Conflict-aware Undo for customer status changes. Not a universal rollback."""
+"""Conflict-aware Undo for the changes a recovery adapter supports. Not a universal rollback."""
 from uuid import uuid4
 
+import adapters
 import verification
-from db import connect, get_customer, list_customers, transaction
+from db import connect, transaction
 from ledger import get_action, get_executed_undo, now, record_action, set_recovery_state
 from schemas import envelope, error_body, error_obj
 
-UNDOABLE_TOOL = "update_customer_status"
-CONFLICT_REASON = "Customer changed since this action; Undo would overwrite a newer edit"
+
+def _current(conn, action):
+    adapter = adapters.for_tool(action["tool_name"])
+    if adapter is None or not action["account_id"]:
+        return None
+    return adapter.snapshot(conn, action["account_id"])
 
 
 def undo_eligibility(action, current):
     """The single definition of when Undo may run. Returns (available, reason, code)."""
     if action["tool_name"] == "undo":
         return False, "This is an Undo record; undoing an Undo is not supported", "not_undoable"
-    if action["tool_name"] != UNDOABLE_TOOL:
-        return False, f"Only {UNDOABLE_TOOL} actions can be undone", "not_undoable"
-    if action["status"] != "executed":
-        return False, f"Action was {action['status']}; there is no change to undo", "not_undoable"
-    if action["recovery_state"] == "recovered":
-        return False, "Already undone", "already_recovered"
-    if (current is None or current != action["after"]
-            or current["version"] != action["after_version"]):
-        return False, CONFLICT_REASON, "conflict"
-    return True, None, None
+    adapter = adapters.for_tool(action["tool_name"])
+    if adapter is None:
+        supported = ", ".join(sorted(adapters.ADAPTERS))
+        return False, f"Only {supported} actions can be undone", "not_undoable"
+    return adapter.classify_reversibility(action, current)
 
 
-def with_undo_fields(db, actions):
-    """Add undo_available / undo_disabled_reason, evaluated against current customers."""
-    customers = {c["account_id"]: c for c in list_customers(db)}
+def with_undo_fields(conn, actions):
+    """Add undo_available / undo_disabled_reason, evaluated against current rows."""
+    rows = {}
     for action in actions:
-        available, reason, _ = undo_eligibility(action, customers.get(action["account_id"]))
+        cache_key = (action["tool_name"], action["account_id"])
+        if cache_key not in rows:
+            rows[cache_key] = _current(conn, action)
+        available, reason, _ = undo_eligibility(action, rows[cache_key])
         action["undo_available"] = available
         action["undo_disabled_reason"] = reason
     return actions
 
 
-def _differences(expected, current):
+def _differences(entity, expected, current):
     if current is None:
-        return {"customer": {"expected": "present", "current": None}}
+        return {entity: {"expected": "present", "current": None}}
     return {
         field: {"expected": expected.get(field), "current": current.get(field)}
         for field in sorted(expected.keys() | current.keys())
@@ -77,7 +80,7 @@ def undo(action_id, actor="api"):
         if action is None:
             return 404, error_body("action_not_found", "Action not found", {"action_id": action_id})
 
-        current = get_customer(db, action["account_id"]) if action["account_id"] else None
+        current = _current(db, action)
         _, reason, code = undo_eligibility(action, current)
 
         if code == "already_recovered":
@@ -89,6 +92,8 @@ def undo(action_id, actor="api"):
                 {"action_id": action_id, "status": action["status"], "tool": action["tool_name"]},
             )
 
+        adapter = adapters.for_tool(action["tool_name"])
+        current_key = f"current_{adapter.entity}"
         expected = action["after"]
         undo_id = str(uuid4())
         common = {
@@ -103,8 +108,8 @@ def undo(action_id, actor="api"):
             evidence = {
                 "expected_after": expected,
                 "expected_version": action["after_version"],
-                "current_customer": current,
-                "differences": _differences(expected, current),
+                current_key: current,
+                "differences": _differences(adapter.entity, expected, current),
             }
             record_action(
                 db, **common, after=current, decision="block", rule_id="undo_conflict",
@@ -112,28 +117,21 @@ def undo(action_id, actor="api"):
             )
             set_recovery_state(db, action_id, "conflict_detected")
         else:
+            target_id = current[adapter.key]
             # Evidence for the post-commit unrelated-rows check, taken under the lock.
-            others_before = verification.snapshot_other_customers(db, current["account_id"])
+            others_before = adapter.snapshot_unrelated(db, target_id)
             db.execute("SAVEPOINT restore")
-            cursor = db.execute(
-                """
-                UPDATE customers
-                SET status = ?, version = version + 1
-                WHERE account_id = ? AND version = ? AND status = ?
-                """,
-                (action["before"]["status"], current["account_id"],
-                 current["version"], current["status"]),
-            )
-            guard = verification.guard_restore(db, action, others_before, cursor.rowcount)
+            rowcount = adapter.restore(db, action, current)
+            guard = verification.guard_restore(adapter, db, action, others_before, rowcount)
             restored = guard["verdict"] == "verified"
             if not restored:
                 db.execute("ROLLBACK TO restore")
             db.execute("RELEASE restore")
 
             outcome = "recovered" if restored else "failed"
-            after = get_customer(db, current["account_id"])
+            after = adapter.snapshot(db, target_id)
             reason = None if restored else "Pre-commit guard failed; restore rolled back"
-            evidence = {"other_customers": others_before, "pre_commit_guard": guard}
+            evidence = {f"other_{adapter.table}": others_before, "pre_commit_guard": guard}
             record_action(
                 db, **common, after=after, decision="allow", rule_id="undo",
                 reason=reason, status="executed" if restored else "failed",
@@ -158,7 +156,7 @@ def undo(action_id, actor="api"):
     if outcome == "failed":
         return 500, envelope(
             {"action_id": action_id, "undo_action_id": undo_id, "status": "failed",
-             "reason": reason, "current_customer": after, "pre_commit_guard": guard,
+             "reason": reason, current_key: after, "pre_commit_guard": guard,
              "verification": result},
             error_obj("restore_failed", reason),
         )

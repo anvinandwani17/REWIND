@@ -1,0 +1,16 @@
+# Policy for the credit_limit adapter (tool: update_credit_limit).
+#
+# Read on every request, so edits apply without a restart. If this file is
+# missing, is not valid YAML, or does not match the expected keys, EVERY
+# credit-limit change is blocked (rule_id: policy_config_invalid) - it fails
+# closed. Amounts are whole INR.
+credit_limit:
+  # Allowed range for any new limit.
+  min_limit: 0
+  max_limit: 500000
+  # Protected customers' credit lines cannot be changed.
+  block_protected_customers: true
+  # A new limit above this needs an approver.
+  approval_above: 200000
+  # An increase larger than this percentage of the current limit needs an approver.
+  approval_increase_pct: 50

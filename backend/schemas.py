@@ -39,6 +39,13 @@ class UpdateCustomerStatusArgs(ToolArgs):
     expected_version: StrictInt | None = Field(default=None, ge=1)
 
 
+class UpdateCreditLimitArgs(ToolArgs):
+    account_id: StrictStr = Field(min_length=1, max_length=64)
+    new_limit: StrictInt = Field(ge=0, le=1_000_000_000)  # whole INR; policy narrows the range
+    reason: StrictStr = Field(min_length=1, max_length=500)
+    expected_version: StrictInt | None = Field(default=None, ge=1)
+
+
 class ApprovalRequest(ToolArgs):
     note: StrictStr | None = Field(default=None, max_length=500)
 

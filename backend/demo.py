@@ -39,6 +39,16 @@ CUSTOMERS = [
 ]
 
 
+# Credit lines (whole INR). ACC-107 and ACC-108 have none.
+CREDIT_LINES = [
+    {"account_id": account_id, "credit_limit": limit}
+    for account_id, limit in [
+        ("ACC-101", 50000), ("ACC-102", 20000), ("ACC-103", 100000),
+        ("ACC-104", 75000), ("ACC-105", 30000), ("ACC-106", 150000),
+    ]
+]
+
+
 def demo_mode_enabled():
     return os.environ.get("REWIND_DEMO_MODE") == "1"
 
@@ -53,25 +63,32 @@ def seed_if_empty():
     with db.transaction() as conn:
         if conn.execute("SELECT COUNT(*) FROM customers").fetchone()[0] == 0:
             db.insert_customers(conn, CUSTOMERS)
+        if conn.execute("SELECT COUNT(*) FROM credit_lines").fetchone()[0] == 0:
+            existing = {row[0] for row in conn.execute("SELECT account_id FROM customers")}
+            db.insert_credit_lines(conn, [c for c in CREDIT_LINES if c["account_id"] in existing])
 
 
 def reset():
-    """Drop, recreate and reseed both tables in one transaction.
+    """Drop, recreate and reseed every table in one transaction.
 
     Recreating (not just deleting) also upgrades a database made with an
     older schema.
     """
     with db.transaction() as conn:
         conn.execute("DROP TABLE IF EXISTS actions")
+        conn.execute("DROP TABLE IF EXISTS credit_lines")
         conn.execute("DROP TABLE IF EXISTS customers")
         db.create_tables(conn)
         db.insert_customers(conn, CUSTOMERS)
+        db.insert_credit_lines(conn, CREDIT_LINES)
         customers = db.list_customers(conn)
+        credit_lines = db.list_credit_lines(conn)
 
     return {
         "status": "reset",
         "demo_now": DEMO_NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "customers": customers,
+        "credit_lines": credit_lines,
         "summary": {
             "total": len(customers),
             "active": sum(c["status"] == "Active" for c in customers),
