@@ -9,6 +9,7 @@ import json
 import re
 from datetime import timedelta
 
+import agent
 import demo
 import gateway
 import ledger
@@ -32,7 +33,7 @@ def make_deterministic(monkeypatch):
     def fake_now():
         return (demo.DEMO_NOW + timedelta(seconds=next(ticks))).isoformat()
 
-    for module in (gateway, recovery):
+    for module in (gateway, recovery, agent):
         monkeypatch.setattr(module, "uuid4", fake_uuid)
     monkeypatch.setattr(ledger, "now", fake_now)
     monkeypatch.setattr(recovery, "now", fake_now)
@@ -135,13 +136,22 @@ def run_examples(client, monkeypatch):
 
     call("actions", "List actions", "GET", "/api/actions")
     call("metrics", "Metrics (no saved lab run)", "GET", "/api/metrics")
-    call("agent_runs_reserved", "Reserved: start an agent run", "POST", "/api/agent/runs")
     call("run_evidence_reserved", "Reserved: run evidence", "GET", "/api/runs/run-1/evidence")
     call("route_not_found", "Unknown route", "GET", "/api/nope")
 
     monkeypatch.delenv("REWIND_DEMO_MODE")
     call("reset_refused", "Reset with demo mode off", "POST", "/api/demo/reset")
     monkeypatch.setenv("REWIND_DEMO_MODE", "1")
+
+    # Agent runs start from a fresh fixture so the replay scripts' expected_version holds.
+    client.post("/api/demo/reset", headers=ROLE_HEADERS["operator"])
+    instruction = "Archive every customer who has been inactive for more than a year."
+    call("agent_run_replay", "Replay run: archive inactive customers", "POST", "/api/agent/runs",
+         {"instruction": instruction, "mode": "replay", "scenario": "archive_inactive"})
+    call("agent_run_replay_blocked", "Replay run stopped by a policy block", "POST", "/api/agent/runs",
+         {"instruction": instruction, "mode": "replay", "scenario": "blocked_protected"})
+    call("agent_run_live_unconfigured", "Live run with no provider configured", "POST",
+         "/api/agent/runs", {"instruction": instruction, "mode": "live"})
     return examples
 
 
@@ -411,18 +421,40 @@ def render(examples):
         "",
         _example(by_id["metrics"], "Timings in this example come from the docs' fixed clock (one second "
                                    "per ledger write), not from real elapsed time."),
+        "### `POST /api/agent/runs` (operator)",
+        "",
+        "Body: `instruction` (1-2000 chars), `mode` (`live` | `replay`), optional `scenario` "
+        "(replay only: which `backend/replays/<scenario>.json` script; default `archive_inactive`).",
+        "",
+        "- **live**: an LLM tool loop. Configure `LLM_PROVIDER=anthropic`, `LLM_API_KEY`, optional "
+        "`LLM_MODEL` (default `claude-opus-5-5`) and `LLM_TIMEOUT_SECONDS` (default 60). The model sees "
+        "only `list_customers`, `get_customer`, `get_inactivity_report` (PII-masked) and "
+        "`update_customer_status`; every change goes through the gateway.",
+        "- **replay**: plays a recorded, versioned script through the same gateway, so policy, ledger "
+        "and verifier all run for real. It is **never** a live model run: the response and every "
+        "ledger row say `mode: \"replay\"`.",
+        "- Max 8 tool calls. An unknown tool or malformed arguments is rejected and the error is fed "
+        "back to the model once; a second one stops the run. Any change the gateway does not execute "
+        "(blocked, pending approval, conflict, not found) stops the run.",
+        "- `final_summary` and `action_ids` are built from this run's ledger rows, not from the model. "
+        "`model_message` (live only) is the model's own last text, shown for context and unverified.",
+        "- `status`: `completed` | `stopped_blocked` | `stopped_invalid_tool_call` | "
+        "`step_limit_reached` | `provider_failed` (HTTP 502, `error.code: provider_failed`; the "
+        "ledger holds exactly what executed before the failure).",
+        "",
+        _example(by_id["agent_run_replay"], "Setup: `POST /api/demo/reset` just before."),
+        _example(by_id["agent_run_replay_blocked"]),
+        _example(by_id["agent_run_live_unconfigured"]),
         "### Reserved (not implemented yet)",
         "",
-        _example(by_id["agent_runs_reserved"]),
         _example(by_id["run_evidence_reserved"]),
         "### Any unknown route",
         "",
         _example(by_id["route_not_found"]),
-        "## Changes since the last version (credit-limit adapter)",
+        "## Changes since the last version (metrics)",
         "",
-        "- New route `GET /api/metrics` (open read).",
-        "- Post-commit `verification` objects (Undo) gain `checked_at`: when the verdict was reached.",
-        "- The lab CLI saves its last run for `/api/metrics`.",
+        "- `POST /api/agent/runs` is implemented (was 501): live and replay runs, see above.",
+        "- Ledger rows created by agent runs carry `mode` (`live` / `replay`) and `actor: \"agent\"`.",
         "",
     ]
     return "\n".join(sections)

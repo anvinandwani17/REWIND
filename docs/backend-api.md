@@ -118,10 +118,12 @@ Read on every request. If the file is missing, invalid YAML, or has the wrong ke
 | `POST /api/tools/update-credit-limit` | 404 | `credit_line_not_found` | No credit line for the account |
 | `GET /api/actions` | 200 | — | List actions |
 | `GET /api/metrics` | 200 | — | Metrics (no saved lab run) |
-| `POST /api/agent/runs` | 501 | `not_implemented` | Reserved: start an agent run |
 | `GET /api/runs/run-1/evidence` | 501 | `not_implemented` | Reserved: run evidence |
 | `GET /api/nope` | 404 | `route_not_found` | Unknown route |
 | `POST /api/demo/reset` | 403 | `demo_mode_off` | Reset with demo mode off |
+| `POST /api/agent/runs` | 200 | — | Replay run: archive inactive customers |
+| `POST /api/agent/runs` | 200 | — | Replay run stopped by a policy block |
+| `POST /api/agent/runs` | 503 | `provider_not_configured` | Live run with no provider configured |
 
 ## Configuration (env vars)
 
@@ -2296,28 +2298,243 @@ Response `200`:
 }
 ```
 
-### Reserved (not implemented yet)
+### `POST /api/agent/runs` (operator)
 
-#### Reserved: start an agent run
+Body: `instruction` (1-2000 chars), `mode` (`live` | `replay`), optional `scenario` (replay only: which `backend/replays/<scenario>.json` script; default `archive_inactive`).
+
+- **live**: an LLM tool loop. Configure `LLM_PROVIDER=anthropic`, `LLM_API_KEY`, optional `LLM_MODEL` (default `claude-opus-5-5`) and `LLM_TIMEOUT_SECONDS` (default 60). The model sees only `list_customers`, `get_customer`, `get_inactivity_report` (PII-masked) and `update_customer_status`; every change goes through the gateway.
+- **replay**: plays a recorded, versioned script through the same gateway, so policy, ledger and verifier all run for real. It is **never** a live model run: the response and every ledger row say `mode: "replay"`.
+- Max 8 tool calls. An unknown tool or malformed arguments is rejected and the error is fed back to the model once; a second one stops the run. Any change the gateway does not execute (blocked, pending approval, conflict, not found) stops the run.
+- `final_summary` and `action_ids` are built from this run's ledger rows, not from the model. `model_message` (live only) is the model's own last text, shown for context and unverified.
+- `status`: `completed` | `stopped_blocked` | `stopped_invalid_tool_call` | `step_limit_reached` | `provider_failed` (HTTP 502, `error.code: provider_failed`; the ledger holds exactly what executed before the failure).
+
+#### Replay run: archive inactive customers
+
+Setup: `POST /api/demo/reset` just before.
 
 ```http
 POST /api/agent/runs
 X-Role: operator
 X-Role-Key: demo-operator-key
+Content-Type: application/json
+
+{
+  "instruction": "Archive every customer who has been inactive for more than a year.",
+  "mode": "replay",
+  "scenario": "archive_inactive"
+}
 ```
 
-Response `501`:
+Response `200`:
+
+```json
+{
+  "data": {
+    "run_id": "run-00000000-0000-4000-8000-000000000019",
+    "mode": "replay",
+    "status": "completed",
+    "instruction": "Archive every customer who has been inactive for more than a year.",
+    "scenario": "archive_inactive",
+    "script_version": 1,
+    "script_source": "Hand-authored demo script, not captured from a model run. Expects the demo fixture after POST /api/demo/reset.",
+    "recorded_instruction": "Archive every customer who has been inactive for more than a year.",
+    "steps": [
+      {
+        "index": 1,
+        "tool": "get_inactivity_report",
+        "args": {
+          "min_inactive_days": 365
+        },
+        "mode": "replay",
+        "outcome": "ok",
+        "result_summary": "4 of 8 customers inactive for 365+ days: ACC-102, ACC-103, ACC-105, ACC-107",
+        "action_id": null,
+        "http_status": null
+      },
+      {
+        "index": 2,
+        "tool": "get_customer",
+        "args": {
+          "account_id": "ACC-102"
+        },
+        "mode": "replay",
+        "outcome": "ok",
+        "result_summary": "ACC-102: status Active, version 1, protected False",
+        "action_id": null,
+        "http_status": null
+      },
+      {
+        "index": 3,
+        "tool": "update_customer_status",
+        "args": {
+          "account_id": "ACC-102",
+          "new_status": "Archived",
+          "reason": "Inactive 591 days per the inactivity report (threshold 365)",
+          "expected_version": 1
+        },
+        "mode": "replay",
+        "outcome": "executed",
+        "result_summary": "executed: ACC-102 Active -> Archived (version 2)",
+        "action_id": "00000000-0000-4000-8000-000000000020",
+        "http_status": 200
+      },
+      {
+        "index": 4,
+        "tool": "get_customer",
+        "args": {
+          "account_id": "ACC-105"
+        },
+        "mode": "replay",
+        "outcome": "ok",
+        "result_summary": "ACC-105: status Active, version 1, protected False",
+        "action_id": null,
+        "http_status": null
+      },
+      {
+        "index": 5,
+        "tool": "update_customer_status",
+        "args": {
+          "account_id": "ACC-105",
+          "new_status": "Archived",
+          "reason": "Inactive 420 days per the inactivity report (threshold 365)",
+          "expected_version": 1
+        },
+        "mode": "replay",
+        "outcome": "executed",
+        "result_summary": "executed: ACC-105 Active -> Archived (version 2)",
+        "action_id": "00000000-0000-4000-8000-000000000021",
+        "http_status": 200
+      }
+    ],
+    "final_summary": "Run completed: the run finished. Ledger for run-00000000-0000-4000-8000-000000000019: 2 executed. executed ACC-102 Active -> Archived; executed ACC-105 Active -> Archived.",
+    "action_ids": [
+      "00000000-0000-4000-8000-000000000020",
+      "00000000-0000-4000-8000-000000000021"
+    ]
+  },
+  "error": null
+}
+```
+
+#### Replay run stopped by a policy block
+
+```http
+POST /api/agent/runs
+X-Role: operator
+X-Role-Key: demo-operator-key
+Content-Type: application/json
+
+{
+  "instruction": "Archive every customer who has been inactive for more than a year.",
+  "mode": "replay",
+  "scenario": "blocked_protected"
+}
+```
+
+Response `200`:
+
+```json
+{
+  "data": {
+    "run_id": "run-00000000-0000-4000-8000-000000000022",
+    "mode": "replay",
+    "status": "stopped_blocked",
+    "instruction": "Archive every customer who has been inactive for more than a year.",
+    "scenario": "blocked_protected",
+    "script_version": 1,
+    "script_source": "Hand-authored demo script, not captured from a model run. Expects the demo fixture after POST /api/demo/reset. The run must stop at the blocked change, so the last two steps never execute.",
+    "recorded_instruction": "Archive every customer who has been inactive for more than a year, starting with the longest inactive.",
+    "steps": [
+      {
+        "index": 1,
+        "tool": "get_inactivity_report",
+        "args": {
+          "min_inactive_days": 365
+        },
+        "mode": "replay",
+        "outcome": "ok",
+        "result_summary": "4 of 8 customers inactive for 365+ days: ACC-102, ACC-103, ACC-105, ACC-107",
+        "action_id": null,
+        "http_status": null
+      },
+      {
+        "index": 2,
+        "tool": "get_customer",
+        "args": {
+          "account_id": "ACC-103"
+        },
+        "mode": "replay",
+        "outcome": "ok",
+        "result_summary": "ACC-103: status Active, version 1, protected True",
+        "action_id": null,
+        "http_status": null
+      },
+      {
+        "index": 3,
+        "tool": "update_customer_status",
+        "args": {
+          "account_id": "ACC-103",
+          "new_status": "Archived",
+          "reason": "Inactive 792 days per the inactivity report (threshold 365)",
+          "expected_version": 1
+        },
+        "mode": "replay",
+        "outcome": "blocked",
+        "result_summary": "blocked by protected_customer: Protected customer: update blocked",
+        "action_id": "00000000-0000-4000-8000-000000000023",
+        "http_status": 403
+      }
+    ],
+    "final_summary": "Run stopped_blocked: REWIND did not execute a requested change, so the run stopped. Ledger for run-00000000-0000-4000-8000-000000000022: 1 blocked. blocked ACC-103 (protected_customer).",
+    "action_ids": [
+      "00000000-0000-4000-8000-000000000023"
+    ]
+  },
+  "error": null
+}
+```
+
+#### Live run with no provider configured
+
+```http
+POST /api/agent/runs
+X-Role: operator
+X-Role-Key: demo-operator-key
+Content-Type: application/json
+
+{
+  "instruction": "Archive every customer who has been inactive for more than a year.",
+  "mode": "live"
+}
+```
+
+Response `503`:
 
 ```json
 {
   "data": null,
   "error": {
-    "code": "not_implemented",
-    "message": "POST /api/agent/runs is reserved and not implemented yet",
-    "details": null
+    "code": "provider_not_configured",
+    "message": "Live mode needs an LLM provider configured",
+    "details": {
+      "missing_env": [
+        "LLM_PROVIDER",
+        "LLM_API_KEY"
+      ],
+      "required_env": [
+        "LLM_PROVIDER=anthropic",
+        "LLM_API_KEY"
+      ],
+      "optional_env": [
+        "LLM_MODEL (default claude-opus-5-5)",
+        "LLM_TIMEOUT_SECONDS (default 60)"
+      ]
+    }
   }
 }
 ```
+
+### Reserved (not implemented yet)
 
 #### Reserved: run evidence
 
@@ -2359,8 +2576,7 @@ Response `404`:
 }
 ```
 
-## Changes since the last version (credit-limit adapter)
+## Changes since the last version (metrics)
 
-- New route `GET /api/metrics` (open read).
-- Post-commit `verification` objects (Undo) gain `checked_at`: when the verdict was reached.
-- The lab CLI saves its last run for `/api/metrics`.
+- `POST /api/agent/runs` is implemented (was 501): live and replay runs, see above.
+- Ledger rows created by agent runs carry `mode` (`live` / `replay`) and `actor: "agent"`.

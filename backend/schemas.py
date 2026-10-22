@@ -1,7 +1,9 @@
 from enum import Enum
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictInt, StrictStr
+from pydantic import (
+    AwareDatetime, BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_validator,
+)
 
 T = TypeVar("T")
 
@@ -44,6 +46,20 @@ class UpdateCreditLimitArgs(ToolArgs):
     new_limit: StrictInt = Field(ge=0, le=1_000_000_000)  # whole INR; policy narrows the range
     reason: StrictStr = Field(min_length=1, max_length=500)
     expected_version: StrictInt | None = Field(default=None, ge=1)
+
+
+class AgentRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    instruction: StrictStr = Field(min_length=1, max_length=2000)
+    mode: Literal["live", "replay"]
+    # Replay only: which backend/replays/<scenario>.json script to play.
+    scenario: StrictStr | None = Field(default=None, pattern=r"^[a-z0-9_]{1,64}$")
+
+    @model_validator(mode="after")
+    def _scenario_is_replay_only(self):
+        if self.mode == "live" and self.scenario is not None:
+            raise ValueError("scenario selects a recorded replay script; it is only valid with mode 'replay'")
+        return self
 
 
 class ApprovalRequest(ToolArgs):

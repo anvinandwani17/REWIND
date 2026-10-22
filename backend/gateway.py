@@ -22,7 +22,8 @@ def _not_pending(action_id, action):
     )
 
 
-def execute(tool_name, arguments, run_id=None, actor="api", approves=None, approval_note=None):
+def execute(tool_name, arguments, run_id=None, actor="api", approves=None, approval_note=None,
+            mode=None):
     """validate -> BEGIN IMMEDIATE -> before-state -> policy -> version check
     -> UPDATE version+1 -> pre-commit guard on after-state -> ledger row -> COMMIT.
 
@@ -64,6 +65,7 @@ def execute(tool_name, arguments, run_id=None, actor="api", approves=None, appro
             # Free-text args (reason) are stored with customer names/phones masked.
             "args": privacy.mask_args(args.model_dump(), names), "actor": actor,
             "scenario": adapter.scenario(settings),
+            "mode": mode,  # "live" | "replay" for agent runs, None for direct API calls
         }
 
         pending = None

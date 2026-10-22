@@ -128,6 +128,13 @@ def get_executed_undo(db, action_id):
     return action_dict(row) if row else None
 
 
+def list_actions_for_run(db, run_id):
+    rows = db.execute(
+        "SELECT * FROM actions WHERE run_id = ? ORDER BY created_at, action_id", (run_id,)
+    ).fetchall()
+    return [action_dict(row) for row in rows]
+
+
 def get_action(db, action_id):
     row = db.execute(
         "SELECT * FROM actions WHERE action_id = ?", (action_id,)

@@ -179,16 +179,94 @@
     },
     "status": 200
   },
-  "agent_runs_reserved": {
+  "agent_run_live_unconfigured": {
     "shape": {
       "data": "null",
       "error": {
         "code": "str",
-        "details": "null",
+        "details": {
+          "missing_env": [
+            "str"
+          ],
+          "optional_env": [
+            "str"
+          ],
+          "required_env": [
+            "str"
+          ]
+        },
         "message": "str"
       }
     },
-    "status": 501
+    "status": 503
+  },
+  "agent_run_replay": {
+    "shape": {
+      "data": {
+        "action_ids": [
+          "str"
+        ],
+        "final_summary": "str",
+        "instruction": "str",
+        "mode": "str",
+        "recorded_instruction": "str",
+        "run_id": "str",
+        "scenario": "str",
+        "script_source": "str",
+        "script_version": "int",
+        "status": "str",
+        "steps": [
+          {
+            "action_id": "null",
+            "args": {
+              "min_inactive_days": "int"
+            },
+            "http_status": "null",
+            "index": "int",
+            "mode": "str",
+            "outcome": "str",
+            "result_summary": "str",
+            "tool": "str"
+          }
+        ]
+      },
+      "error": "null"
+    },
+    "status": 200
+  },
+  "agent_run_replay_blocked": {
+    "shape": {
+      "data": {
+        "action_ids": [
+          "str"
+        ],
+        "final_summary": "str",
+        "instruction": "str",
+        "mode": "str",
+        "recorded_instruction": "str",
+        "run_id": "str",
+        "scenario": "str",
+        "script_source": "str",
+        "script_version": "int",
+        "status": "str",
+        "steps": [
+          {
+            "action_id": "null",
+            "args": {
+              "min_inactive_days": "int"
+            },
+            "http_status": "null",
+            "index": "int",
+            "mode": "str",
+            "outcome": "str",
+            "result_summary": "str",
+            "tool": "str"
+          }
+        ]
+      },
+      "error": "null"
+    },
+    "status": 200
   },
   "approve_not_pending": {
     "shape": {

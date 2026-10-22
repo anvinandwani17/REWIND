@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+import agent
 import db
 import demo
 import gateway
@@ -17,7 +18,7 @@ import metrics
 import privacy
 import recovery
 import roles
-from schemas import ActionRecord, ApprovalRequest, Envelope, envelope, error_body
+from schemas import ActionRecord, AgentRunRequest, ApprovalRequest, Envelope, envelope, error_body
 
 FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "http://localhost:5173")
 
@@ -195,8 +196,8 @@ def not_implemented(route):
 
 
 @app.post("/api/agent/runs")
-def start_agent_run(role: str = operator):
-    return not_implemented("POST /api/agent/runs")
+def start_agent_run(request: AgentRunRequest, role: str = operator):
+    return respond(agent.start_run(request))
 
 
 @app.get("/api/runs/{run_id}/evidence")

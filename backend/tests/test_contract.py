@@ -27,7 +27,8 @@ def examples(tmp_path, monkeypatch):
     # Fixed, never-created path so the generated docs don't depend on a local lab run.
     monkeypatch.setenv("REWIND_LAB_RESULTS_PATH", "no-lab-run-saved/lab_last_run.json")
     for name in ("REWIND_RECENT_ACTIVITY_DAYS", "REWIND_BULK_APPROVAL_THRESHOLD",
-                 "REWIND_FAULT_DISABLE_RECENT_ACTIVITY"):
+                 "REWIND_FAULT_DISABLE_RECENT_ACTIVITY", "REWIND_ROLE_KEYS", "REWIND_POLICIES_PATH",
+                 "LLM_PROVIDER", "LLM_MODEL", "LLM_API_KEY", "LLM_TIMEOUT_SECONDS"):
         monkeypatch.delenv(name, raising=False)
     make_deterministic(monkeypatch)
     with TestClient(main.app) as client:
@@ -100,7 +101,9 @@ def test_documented_status_codes(examples):
         "credit_not_found": (404, "credit_line_not_found"),
         "actions": (200, None),
         "metrics": (200, None),
-        "agent_runs_reserved": (501, "not_implemented"),
+        "agent_run_replay": (200, None),
+        "agent_run_replay_blocked": (200, None),
+        "agent_run_live_unconfigured": (503, "provider_not_configured"),
         "run_evidence_reserved": (501, "not_implemented"),
         "route_not_found": (404, "route_not_found"),
         "reset_refused": (403, "demo_mode_off"),

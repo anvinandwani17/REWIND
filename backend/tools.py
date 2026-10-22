@@ -63,9 +63,11 @@ def update_credit_limit(account_id, new_limit, reason, expected_version=None, ru
     return status, privacy.mask_pii(body)
 
 
-def update_customer_status(account_id, new_status, reason, expected_version=None, run_id=None):
+def update_customer_status(account_id, new_status, reason, expected_version=None, run_id=None,
+                           mode=None):
     args = {"account_id": account_id, "new_status": new_status, "reason": reason}
     if expected_version is not None:
         args["expected_version"] = expected_version
-    status, body = gateway.execute("update_customer_status", args, run_id=run_id, actor="agent")
+    status, body = gateway.execute("update_customer_status", args, run_id=run_id, actor="agent",
+                                   mode=mode)
     return status, privacy.mask_pii(body)
