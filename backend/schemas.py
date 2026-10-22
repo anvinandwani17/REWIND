@@ -76,4 +76,6 @@ class ActionRecord(BaseModel):
     undo_of_action_id: str | None
     recovery_state: str
     verification: dict[str, Any] | None
+    evidence: dict[str, Any] | None
+    recovery_verification: dict[str, Any] | None
     recovered_at: str | None

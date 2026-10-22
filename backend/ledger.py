@@ -27,6 +27,8 @@ def action_dict(row):
         "status": row["status"],
         "recovery_state": row["recovery_state"],
         "verification": _loads(row["verification_json"]),
+        "evidence": _loads(row["evidence_json"]),
+        "recovery_verification": _loads(row["recovery_verification_json"]),
         "created_at": row["created_at"],
         "recovered_at": row["recovered_at"],
         "actor": row["actor"],
@@ -45,7 +47,7 @@ def action_dict(row):
 def record_action(
     db, *, action_id, tool, args, before, after, decision, rule_id, risk,
     status, recovery_state, verification, reason=None, run_id=None,
-    actor="api", mode=None, scenario=None, undo_of_action_id=None,
+    actor="api", mode=None, scenario=None, undo_of_action_id=None, evidence=None,
 ):
     """Insert a ledger row using the caller's transaction."""
     db.execute(
@@ -54,9 +56,9 @@ def record_action(
             action_id, created_at, actor, tool, args_json, decision, rule_id,
             reason, risk, status, account_id, before_json, after_json,
             before_version, after_version, run_id, mode, scenario,
-            undo_of_action_id, recovery_state, verification_json
+            undo_of_action_id, recovery_state, verification_json, evidence_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             action_id, now(), actor, tool, json.dumps(args), decision, rule_id,
@@ -66,8 +68,19 @@ def record_action(
             before["version"] if before else None,
             after["version"] if after else None,
             run_id, mode, scenario, undo_of_action_id,
-            recovery_state, _dumps(verification),
+            recovery_state, _dumps(verification), _dumps(evidence),
         ),
+    )
+
+
+def store_undo_verification(db, undo_action_id, original_action_id, result):
+    db.execute(
+        "UPDATE actions SET verification_json = ? WHERE action_id = ?",
+        (_dumps(result), undo_action_id),
+    )
+    db.execute(
+        "UPDATE actions SET recovery_verification_json = ? WHERE action_id = ?",
+        (_dumps(result), original_action_id),
     )
 
 

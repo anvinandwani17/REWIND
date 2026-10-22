@@ -33,26 +33,39 @@ Scope: Undo is supported for **customer status changes only**. This is not a uni
 ```
 Codes: `invalid_arguments`, `invalid_request`, `unsupported_tool`, `customer_not_found`, `action_not_found`, `version_conflict`, `demo_mode_off`.
 
-**Verification** (deterministic code re-reading SQLite inside the write transaction; never the LLM)
+**Verification** (deterministic code reading SQLite; never the LLM)
 ```json
-{"status": "verified" | "failed", "checks": {"<check>": true}, "current_customer": Customer | null}
+{"verdict": "verified" | "failed" | "conflict_detected" | "manual_review_required",
+ "stage": "pre_commit_guard" | "post_commit",
+ "scope": "plain sentence of exactly what was checked",
+ "checks": [{"id", "description", "expected", "actual", "passed"}]}
 ```
-Update checks: `requested_status_applied`, `version_incremented`, `unrelated_records_unchanged`, `database_integrity_ok`.
-Undo checks: `original_status_restored`, `version_incremented`, `unrelated_records_unchanged`, `database_integrity_ok`.
+`passed` is always `expected == actual`. A check is listed only when its evidence was compared.
+
+- `pre_commit_guard` (update responses, and inside Undo): runs inside the write transaction before commit and decides whether to roll back. Checks: `one_row_updated`, `status_written`, `version_incremented_by_one`, `other_customers_unchanged_in_transaction`. It does **not** re-read committed data.
+- `post_commit` (every Undo attempt): runs after commit on a new SQLite connection.
+  - Restore committed → checks `restored_value`, `version_transition`, `ledger_consistency`, `db_integrity`, `unrelated_rows_unchanged` (hash of all other rows in customers table, stored just before the restore). `verified` only if all pass; `failed` if any fails; `manual_review_required` if the stored snapshot is missing/unreadable (that check is then omitted and the scope says so).
+  - Conflict → `conflict_evidence`, `customer_not_written`, `ledger_consistency`, `db_integrity`; verdict `conflict_detected` (or `manual_review_required` if those don't hold).
+  - Restore rolled back → `customer_not_written`, `ledger_consistency`, `db_integrity`; verdict `failed` (never `verified`).
+
+**Show "verified" only when `verdict == "verified"`.** A restore can be committed (`status: "recovered"`) with verdict `failed`.
 
 **ActionRecord** (one ledger row)
 ```json
 {"id", "created_at", "actor", "tool_name", "arguments", "decision", "rule_id", "reason",
  "risk", "status", "account_id", "before", "after", "before_version", "after_version",
  "run_id", "mode", "scenario", "undo_of_action_id", "recovery_state", "verification",
- "recovered_at"}
+ "evidence", "recovery_verification", "recovered_at"}
 ```
 - `actor`: `api` (direct HTTP call) | `agent`
 - `decision`: `allow` | `block` | `require_approval` | `reject`
 - `rule_id`: `default_allow`, `protected_customer`, `unknown_status`, `no_change`, `recent_activity`, `bulk_change`, `account_not_found`
 - `tool_name`: `update_customer_status` | `undo`
 - `status`: `executed` | `blocked` | `pending_approval` | `rejected` | `failed` | `conflict_detected` (undo attempts)
-- `recovery_state`: `available` | `unavailable` | `conflict_detected` | `recovered` | `verification_failed`
+- `recovery_state`: `available` | `unavailable` | `conflict_detected` | `recovered` | `restore_failed`
+- `verification`: updates → the pre-commit guard; undo rows → the post-commit verdict
+- `evidence`: undo rows only → pre-restore snapshot + guard, or conflict evidence
+- `recovery_verification`: originals → post-commit verdict of the latest Undo attempt
 - `undo_of_action_id`: on undo rows, the action being undone
 - `risk`: `low` | `medium` | `high`
 - `mode`: `null` for direct calls; later `live` | `replay` (replay is never a live model run)
@@ -94,12 +107,13 @@ in the same transaction as any customer change.
 
 | Code | Body |
 |---|---|
-| 200 | `{action_id, undo_action_id, status: "recovered", already_recovered: false, before, after, verification}`; customer restored, version +1, original's `recovery_state` → `recovered` |
-| 200 | Same body with `already_recovered: true` when the action was already recovered; nothing changes |
-| 409 | `{action_id, undo_action_id, status: "conflict_detected", reason, expected_after, expected_version, current_customer, differences: {field: {expected, current}}}`; customer untouched, attempt logged |
+| 200 | `{action_id, undo_action_id, status: "recovered", already_recovered: false, before, after, verification}` with `verification.verdict == "verified"` |
+| 500 | Same body but verdict `failed` / `manual_review_required`: the restore **is committed** but could not be verified |
+| 200/500 | Same body with `already_recovered: true` on a repeat call; returns the stored result, nothing changes |
+| 409 | `{action_id, undo_action_id, status: "conflict_detected", reason, expected_after, expected_version, current_customer, differences: {field: {expected, current}}, verification}`; customer untouched, attempt logged |
 | 409 | Error `not_undoable`, `details: {action_id, status, tool}` (blocked/rejected/pending actions, or an undo row) |
 | 404 | Error `action_not_found` |
-| 500 | `{action_id, undo_action_id, status: "failed", reason, verification, current_customer}`; restore rolled back, retry allowed |
+| 500 | `{action_id, undo_action_id, status: "failed", reason, current_customer, pre_commit_guard, verification}`; restore rolled back, retry allowed |
 
 ### `POST /api/demo/reset`
 Needs `REWIND_DEMO_MODE=1`, otherwise 403 Error `demo_mode_off`.
@@ -112,6 +126,14 @@ Drops, recreates and reseeds both tables in one transaction (also upgrades an ol
 ```
 
 ## Change log
+
+### Priority-0 item 4 (2026-10-22)
+- **Breaking:** every `verification` object is now `{verdict, stage, scope, checks: [...]}` (was `{status, checks: {name: bool}, current_customer}`).
+- **Breaking:** check ids renamed: `requested_status_applied`/`original_status_restored` → `status_written`; `version_incremented` → `version_incremented_by_one`; `unrelated_records_unchanged` → `other_customers_unchanged_in_transaction`; `database_integrity_ok` removed from the pre-commit guard (now `db_integrity` in the post-commit verifier).
+- **Breaking:** a committed Undo whose post-commit verdict isn't `verified` returns 500 (body still `status: "recovered"`).
+- `recovery_state` `verification_failed` renamed `restore_failed`.
+- ActionRecord gains `evidence` and `recovery_verification`.
+- Local DBs from before this change need one `POST /api/demo/reset`.
 
 ### Priority-0 item 3 (2026-10-22)
 - **Breaking:** successful Undo returns `status: "recovered"` (was `"verified"`); checks moved under `verification.checks`.

@@ -7,7 +7,7 @@ from pydantic import ValidationError
 import demo
 import policies
 import verification
-from db import get_customer, other_customers, transaction
+from db import get_customer, transaction
 from ledger import count_executed_in_run, record_action
 from schemas import UpdateCustomerStatusArgs, error_body
 
@@ -16,7 +16,7 @@ SUPPORTED_TOOLS = {"update_customer_status": UpdateCustomerStatusArgs}
 
 def execute(tool_name, arguments, run_id=None, actor="api"):
     """validate -> BEGIN IMMEDIATE -> before-state -> policy -> version check
-    -> UPDATE version+1 -> verify after-state -> ledger row -> COMMIT.
+    -> UPDATE version+1 -> pre-commit guard on after-state -> ledger row -> COMMIT.
 
     The policy runs inside the lock because it needs the before-state; checking
     it outside would let the customer change between check and write.
@@ -94,7 +94,7 @@ def execute(tool_name, arguments, run_id=None, actor="api"):
                  "current_version": before["version"]},
             )
 
-        others_before = other_customers(db, args.account_id)
+        others_before = verification.snapshot_other_customers(db, args.account_id)
         db.execute("SAVEPOINT write")
         cursor = db.execute(
             """
@@ -104,9 +104,11 @@ def execute(tool_name, arguments, run_id=None, actor="api"):
             """,
             (args.new_status, args.account_id, before["version"]),
         )
-        result = verification.verify_update(db, before, args.new_status, others_before)
-        # Never "executed" unless exactly one row actually changed and verified.
-        executed = cursor.rowcount == 1 and result["status"] == "verified"
+        result = verification.guard_update(
+            db, before, args.new_status, others_before, cursor.rowcount
+        )
+        # Never "executed" unless exactly one row changed and every guard check passed.
+        executed = result["verdict"] == "verified"
         if not executed:
             db.execute("ROLLBACK TO write")
         db.execute("RELEASE write")
@@ -115,7 +117,7 @@ def execute(tool_name, arguments, run_id=None, actor="api"):
         status, recovery_state = (
             ("executed", "available") if executed else ("failed", "unavailable")
         )
-        reason = decision["reason"] if executed else "Write did not verify; rolled back"
+        reason = decision["reason"] if executed else "Pre-commit guard failed; write rolled back"
         record_action(
             db, **common, before=before, after=after,
             decision=decision["decision"], rule_id=decision["rule_id"],

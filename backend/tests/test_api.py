@@ -1,4 +1,5 @@
 import importlib
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -153,7 +154,9 @@ def test_authorized_update_changes_exactly_one_row(client):
     assert action["arguments"]["reason"] == "inactive for over a year"
     assert action["run_id"] == "run-1"
     assert action["recovery_state"] == "available"
-    assert all(body["verification"]["checks"].values())
+    assert body["verification"]["verdict"] == "verified"
+    assert body["verification"]["stage"] == "pre_commit_guard"
+    assert all(c["passed"] for c in body["verification"]["checks"])
 
 
 def test_get_action_by_id(client):
@@ -322,7 +325,7 @@ def test_exception_mid_transaction_leaves_no_trace(client, monkeypatch):
 
 def test_update_verification_failure_rolls_back_write_but_logs(client, monkeypatch):
     import verification
-    monkeypatch.setattr(verification, "verify_update", failed_check)
+    monkeypatch.setattr(verification, "guard_update", failed_check)
 
     response = archive(client, "ACC-102")
     assert response.status_code == 500
@@ -336,7 +339,7 @@ def test_update_verification_failure_rolls_back_write_but_logs(client, monkeypat
 # --- undo -------------------------------------------------------------------------------
 
 def failed_check(*args):
-    return {"status": "failed", "checks": {"forced": False}, "current_customer": None}
+    return {"verdict": "failed", "stage": "pre_commit_guard", "scope": "forced failure (test)", "checks": []}
 
 
 def undo(client, action_id):
@@ -353,7 +356,13 @@ def test_undo_restores_and_bumps_version(client):
     body = response.json()
     assert response.status_code == 200
     assert (body["status"], body["already_recovered"]) == ("recovered", False)
-    assert all(body["verification"]["checks"].values())
+    assert body["verification"]["verdict"] == "verified"
+    assert body["verification"]["stage"] == "post_commit"
+    assert {c["id"] for c in body["verification"]["checks"]} == {
+        "restored_value", "version_transition", "ledger_consistency",
+        "db_integrity", "unrelated_rows_unchanged",
+    }
+    assert all(c["passed"] for c in body["verification"]["checks"])
     assert (body["before"]["status"], body["before"]["version"]) == ("Archived", 2)
     assert (body["after"]["status"], body["after"]["version"]) == ("Active", 3)
     assert customer(client, "ACC-102")["status"] == "Active"
@@ -369,7 +378,10 @@ def test_undo_restores_and_bumps_version(client):
     assert original["recovery_state"] == "recovered"
     assert original["recovered_at"] is not None
     # The original's own forward verification is preserved.
-    assert "requested_status_applied" in original["verification"]["checks"]
+    assert original["verification"]["stage"] == "pre_commit_guard"
+    # The undo verdict is persisted and exposed on both rows.
+    assert original["recovery_verification"] == body["verification"]
+    assert client.get(f"/api/actions/{body['undo_action_id']}").json()["verification"] == body["verification"]
 
 
 def test_undo_after_second_actor_edit_conflicts_and_keeps_newer_edit(client):
@@ -398,7 +410,10 @@ def test_undo_after_second_actor_edit_conflicts_and_keeps_newer_edit(client):
     [attempt] = undo_rows(client, action_id)
     assert attempt["status"] == "conflict_detected"
     assert attempt["before"] == attempt["after"] == newer
-    assert attempt["verification"]["differences"] == body["differences"]
+    assert attempt["evidence"]["differences"] == body["differences"]
+    assert body["verification"]["verdict"] == "conflict_detected"
+    assert all(c["passed"] for c in body["verification"]["checks"])
+    assert attempt["verification"] == body["verification"]
     ops_row = next(a for a in actions(client) if a["actor"] == "ops_user")
     assert ops_row["status"] == "executed"
     assert client.get(f"/api/actions/{action_id}").json()["recovery_state"] == "conflict_detected"
@@ -471,9 +486,9 @@ def test_undo_unknown_action_returns_error_object(client):
 
 def test_failed_restore_verification_rolls_back_restore(client, monkeypatch):
     import verification
-    real_verify_restore = verification.verify_restore
+    real_guard_restore = verification.guard_restore
     action_id = archive(client, "ACC-102").json()["action_id"]
-    monkeypatch.setattr(verification, "verify_restore", failed_check)
+    monkeypatch.setattr(verification, "guard_restore", failed_check)
 
     response = undo(client, action_id)
     assert response.status_code == 500
@@ -481,14 +496,118 @@ def test_failed_restore_verification_rolls_back_restore(client, monkeypatch):
     assert customer(client, "ACC-102")["status"] == "Archived"
     assert customer(client, "ACC-102")["version"] == 2
     original = client.get(f"/api/actions/{action_id}").json()
-    assert original["recovery_state"] == "verification_failed"
+    assert original["recovery_state"] == "restore_failed"
+    assert original["recovery_verification"]["verdict"] == "failed"
     assert original["recovered_at"] is None
     [attempt] = undo_rows(client, action_id)
     assert attempt["status"] == "failed"
 
     # A retry is allowed once verification passes again.
-    monkeypatch.setattr(verification, "verify_restore", real_verify_restore)
+    monkeypatch.setattr(verification, "guard_restore", real_guard_restore)
     assert undo(client, action_id).status_code == 200
+
+
+# --- post-commit verifier: negative tests (no false "verified") -----------------------
+
+import verification as verifier
+
+
+def recovered(client, account_id="ACC-102"):
+    action_id = archive(client, account_id).json()["action_id"]
+    body = undo(client, action_id).json()
+    assert body["verification"]["verdict"] == "verified"
+    return action_id, body["undo_action_id"]
+
+
+def failed_ids(result):
+    return {c["id"] for c in result["checks"] if not c["passed"]}
+
+
+def test_tampering_with_another_customer_after_restore_fails(client):
+    action_id, undo_id = recovered(client)
+    with db.transaction() as conn:
+        conn.execute("UPDATE customers SET name = 'Tampered' WHERE account_id = 'ACC-108'")
+
+    result = verifier.verify_undo(undo_id)
+    assert result["verdict"] == "failed"
+    assert failed_ids(result) == {"unrelated_rows_unchanged"}
+    # Persisted: the API now reports failed, and a repeat Undo is not a 200.
+    assert client.get(f"/api/actions/{action_id}").json()["recovery_verification"]["verdict"] == "failed"
+    assert undo(client, action_id).status_code == 500
+
+
+def test_tampering_with_the_restored_row_fails(client):
+    _, undo_id = recovered(client)
+    with db.transaction() as conn:
+        conn.execute("UPDATE customers SET status = 'Archived' WHERE account_id = 'ACC-102'")
+    result = verifier.verify_undo(undo_id)
+    assert result["verdict"] == "failed"
+    assert failed_ids(result) == {"restored_value"}
+
+
+def test_tampering_with_the_restored_version_fails(client):
+    _, undo_id = recovered(client)
+    with db.transaction() as conn:
+        conn.execute("UPDATE customers SET version = version + 1 WHERE account_id = 'ACC-102'")
+    result = verifier.verify_undo(undo_id)
+    assert result["verdict"] == "failed"
+    assert failed_ids(result) == {"version_transition"}
+
+
+def set_evidence(undo_id, evidence_json):
+    with db.transaction() as conn:
+        conn.execute("UPDATE actions SET evidence_json = ? WHERE action_id = ?", (evidence_json, undo_id))
+
+
+def test_corrupted_snapshot_hash_fails(client):
+    _, undo_id = recovered(client)
+    with db.connect() as conn:
+        evidence = json.loads(conn.execute(
+            "SELECT evidence_json FROM actions WHERE action_id = ?", (undo_id,)).fetchone()[0])
+    evidence["other_customers"]["sha256"] = "0" * 64
+    set_evidence(undo_id, json.dumps(evidence))
+
+    result = verifier.verify_undo(undo_id)
+    assert result["verdict"] == "failed"
+    assert failed_ids(result) == {"unrelated_rows_unchanged"}
+
+
+@pytest.mark.parametrize("evidence_json", [
+    None,
+    json.dumps({"other_customers": "garbage"}),
+    json.dumps({"other_customers": {"sha256": "abc", "row_count": 7}}),
+])
+def test_missing_or_unreadable_snapshot_is_never_verified(client, evidence_json):
+    _, undo_id = recovered(client)
+    set_evidence(undo_id, evidence_json)
+
+    result = verifier.verify_undo(undo_id)
+    assert result["verdict"] == "manual_review_required"
+    # The check is omitted rather than claimed, and the scope says so.
+    assert "unrelated_rows_unchanged" not in {c["id"] for c in result["checks"]}
+    assert "did NOT check unrelated rows" in result["scope"]
+
+
+def test_tampering_between_commit_and_verifier_makes_undo_response_unverified(client, monkeypatch):
+    action_id = archive(client, "ACC-102").json()["action_id"]
+    real_verify_undo = verifier.verify_undo
+
+    def tamper_then_verify(undo_id):
+        with db.transaction() as conn:
+            conn.execute("UPDATE customers SET name = 'Sneaky' WHERE account_id = 'ACC-105'")
+        return real_verify_undo(undo_id)
+
+    monkeypatch.setattr(verifier, "verify_undo", tamper_then_verify)
+    response = undo(client, action_id)
+    assert response.status_code == 500
+    assert response.json()["status"] == "recovered"
+    assert response.json()["verification"]["verdict"] == "failed"
+
+
+def test_every_listed_check_compares_shown_evidence(client):
+    _, undo_id = recovered(client)
+    for check in verifier.verify_undo(undo_id)["checks"]:
+        assert check["passed"] == (check["expected"] == check["actual"])
 
 
 def test_backend_logic_has_no_hardcoded_account_ids():

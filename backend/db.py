@@ -44,7 +44,9 @@ CREATE TABLE IF NOT EXISTS actions (
     scenario TEXT,                               -- e.g. injected_fault
     undo_of_action_id TEXT REFERENCES actions(action_id),
     recovery_state TEXT NOT NULL,
-    verification_json TEXT,
+    verification_json TEXT,                      -- undo rows: post-commit verifier result
+    evidence_json TEXT,                          -- undo rows: pre-restore snapshot, guard, conflict evidence
+    recovery_verification_json TEXT,             -- originals: latest undo attempt's verifier result
     recovered_at TEXT
 );
 
