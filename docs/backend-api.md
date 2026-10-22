@@ -1508,10 +1508,21 @@ Response `200`:
           "passed": true
         },
         {
-          "id": "ledger_snapshot_intact",
-          "description": "The action's stored before/after snapshots still match the digest recorded when it was written",
+          "id": "snapshot_matches_stored_digest",
+          "description": "Stored before/after snapshots match the SHA-256 stored in the same ledger row when it was written (an edit that also rewrites that digest is not detectable from this row)",
           "expected": "5be3670c4c56b2f9390aeea0c2354469a3a330a39c76da4f7dd579890168e63b",
           "actual": "5be3670c4c56b2f9390aeea0c2354469a3a330a39c76da4f7dd579890168e63b",
+          "passed": true
+        },
+        {
+          "id": "before_differs_from_after",
+          "description": "Stored before-state credit_limit differs from the stored after-state credit_limit: every executed change changes it, so equal values mean the restore target cannot be trusted",
+          "expected": {
+            "differs": true
+          },
+          "actual": {
+            "differs": true
+          },
           "passed": true
         },
         {
@@ -2078,10 +2089,21 @@ Response `200`:
           "passed": true
         },
         {
-          "id": "ledger_snapshot_intact",
-          "description": "The action's stored before/after snapshots still match the digest recorded when it was written",
+          "id": "snapshot_matches_stored_digest",
+          "description": "Stored before/after snapshots match the SHA-256 stored in the same ledger row when it was written (an edit that also rewrites that digest is not detectable from this row)",
           "expected": "45393dc4a75b8afd2b62478f1a012d40f1b3a78ad1d36802207b6ea4de6a7b9f",
           "actual": "45393dc4a75b8afd2b62478f1a012d40f1b3a78ad1d36802207b6ea4de6a7b9f",
+          "passed": true
+        },
+        {
+          "id": "before_differs_from_after",
+          "description": "Stored before-state status differs from the stored after-state status: every executed change changes it, so equal values mean the restore target cannot be trusted",
+          "expected": {
+            "differs": true
+          },
+          "actual": {
+            "differs": true
+          },
           "passed": true
         },
         {
@@ -2188,10 +2210,21 @@ Response `200`:
           "passed": true
         },
         {
-          "id": "ledger_snapshot_intact",
-          "description": "The action's stored before/after snapshots still match the digest recorded when it was written",
+          "id": "snapshot_matches_stored_digest",
+          "description": "Stored before/after snapshots match the SHA-256 stored in the same ledger row when it was written (an edit that also rewrites that digest is not detectable from this row)",
           "expected": "45393dc4a75b8afd2b62478f1a012d40f1b3a78ad1d36802207b6ea4de6a7b9f",
           "actual": "45393dc4a75b8afd2b62478f1a012d40f1b3a78ad1d36802207b6ea4de6a7b9f",
+          "passed": true
+        },
+        {
+          "id": "before_differs_from_after",
+          "description": "Stored before-state status differs from the stored after-state status: every executed change changes it, so equal values mean the restore target cannot be trusted",
+          "expected": {
+            "differs": true
+          },
+          "actual": {
+            "differs": true
+          },
           "passed": true
         },
         {
@@ -2438,7 +2471,7 @@ Response `200`:
     },
     "lab": {
       "available": false,
-      "path": "no-lab-run-saved/lab_report.json"
+      "file": "lab_report.json"
     },
     "assumptions": [
       "actions.* counts forward actions only (every ledger row whose tool is not 'undo'); actions.by_status has the full breakdown.",
@@ -2945,10 +2978,21 @@ Response `200`:
                     "passed": true
                   },
                   {
-                    "id": "ledger_snapshot_intact",
-                    "description": "The action's stored before/after snapshots still match the digest recorded when it was written",
+                    "id": "snapshot_matches_stored_digest",
+                    "description": "Stored before/after snapshots match the SHA-256 stored in the same ledger row when it was written (an edit that also rewrites that digest is not detectable from this row)",
                     "expected": "45393dc4a75b8afd2b62478f1a012d40f1b3a78ad1d36802207b6ea4de6a7b9f",
                     "actual": "45393dc4a75b8afd2b62478f1a012d40f1b3a78ad1d36802207b6ea4de6a7b9f",
+                    "passed": true
+                  },
+                  {
+                    "id": "before_differs_from_after",
+                    "description": "Stored before-state status differs from the stored after-state status: every executed change changes it, so equal values mean the restore target cannot be trusted",
+                    "expected": {
+                      "differs": true
+                    },
+                    "actual": {
+                      "differs": true
+                    },
                     "passed": true
                   },
                   {
@@ -3170,10 +3214,11 @@ Response `404`:
 }
 ```
 
-## Changes since the last version (agent runs)
+## Changes since the last version (security review)
 
-- New: `GET /api/runs/{run_id}/evidence` (was 501) and `POST /api/lab/run`.
-- Update responses and ActionRecord gain `post_action_check`; ActionRecord gains `flag` and `snapshot_sha256` (digest of the stored before/after, checked before every restore).
-- Undo verification gains the `ledger_snapshot_intact` check.
-- `/api/metrics`: `flagged` now also counts `flagged_unsafe` actions; the lab section reads `backend/data/lab_report.json`.
-- Local DBs from before this change need one `POST /api/demo/reset`.
+- **Breaking:** the demo role keys work only with `REWIND_DEMO_MODE=1`. Outside demo mode, set `REWIND_ROLE_KEYS`; otherwise role-gated routes return 401 `role_keys_not_configured`.
+- Undo checks renamed/added: `ledger_snapshot_intact` -> `snapshot_matches_stored_digest` (its description now says it cannot detect a rewrite of the digest too), plus `before_differs_from_after`, which refuses a restore whose stored before-state equals the after-state.
+- New error code `approval_mismatch` (409) from the gateway when approval arguments differ from the pending action.
+- `/api/metrics` `lab.path` -> `lab.file` (file name only); `lab.error` is the error type only.
+- `lab_failed` errors no longer include `stderr_tail`.
+- Credit-limit `policy_config_invalid` reasons name the error type only (no file paths).

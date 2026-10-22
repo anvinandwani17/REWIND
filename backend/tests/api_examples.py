@@ -139,7 +139,10 @@ def run_examples(client, monkeypatch):
     call("route_not_found", "Unknown route", "GET", "/api/nope")
 
     monkeypatch.delenv("REWIND_DEMO_MODE")
+    # Outside demo mode the demo keys are refused, so this server has its keys configured.
+    monkeypatch.setenv("REWIND_ROLE_KEYS", ",".join(f"{r}=demo-{r}-key" for r in ROLE_HEADERS))
     call("reset_refused", "Reset with demo mode off", "POST", "/api/demo/reset")
+    monkeypatch.delenv("REWIND_ROLE_KEYS")
     monkeypatch.setenv("REWIND_DEMO_MODE", "1")
 
     # Agent runs start from a fresh fixture so the replay scripts' expected_version holds.
@@ -484,15 +487,19 @@ def render(examples):
         "### Any unknown route",
         "",
         _example(by_id["route_not_found"]),
-        "## Changes since the last version (agent runs)",
+        "## Changes since the last version (security review)",
         "",
-        "- New: `GET /api/runs/{run_id}/evidence` (was 501) and `POST /api/lab/run`.",
-        "- Update responses and ActionRecord gain `post_action_check`; ActionRecord gains `flag` and "
-        "`snapshot_sha256` (digest of the stored before/after, checked before every restore).",
-        "- Undo verification gains the `ledger_snapshot_intact` check.",
-        "- `/api/metrics`: `flagged` now also counts `flagged_unsafe` actions; the lab section reads "
-        "`backend/data/lab_report.json`.",
-        "- Local DBs from before this change need one `POST /api/demo/reset`.",
+        "- **Breaking:** the demo role keys work only with `REWIND_DEMO_MODE=1`. Outside demo mode, "
+        "set `REWIND_ROLE_KEYS`; otherwise role-gated routes return 401 `role_keys_not_configured`.",
+        "- Undo checks renamed/added: `ledger_snapshot_intact` -> `snapshot_matches_stored_digest` "
+        "(its description now says it cannot detect a rewrite of the digest too), plus "
+        "`before_differs_from_after`, which refuses a restore whose stored before-state equals the "
+        "after-state.",
+        "- New error code `approval_mismatch` (409) from the gateway when approval arguments differ "
+        "from the pending action.",
+        "- `/api/metrics` `lab.path` -> `lab.file` (file name only); `lab.error` is the error type only.",
+        "- `lab_failed` errors no longer include `stderr_tail`.",
+        "- Credit-limit `policy_config_invalid` reasons name the error type only (no file paths).",
         "",
     ]
     return "\n".join(sections)

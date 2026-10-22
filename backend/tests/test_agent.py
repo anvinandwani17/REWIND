@@ -15,8 +15,9 @@ RUNS = "/api/agent/runs"
 
 
 class FakeProvider(agent.Provider):
-    """Returns scripted turns; an Exception in the script is raised instead."""
-    name, model = "fake", "fake-model"
+    """Returns scripted turns; an Exception in the script is raised instead. Stands in for
+    a live model to test the live code path, so it says live = True explicitly."""
+    name, model, live = "fake", "fake-model", True
 
     def __init__(self, turns):
         self.turns = list(turns)

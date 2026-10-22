@@ -19,7 +19,7 @@ STATUS = "/api/tools/update-customer-status"
 LISTED = ["clean_archive", "protected_block", "recent_activity_block", "stale_report_fault",
           "conflict_after_edit", "double_undo", "tampered_snapshot", "unrelated_row_tamper",
           "malformed_tool_call", "provider_failure", "second_customer"]
-FAULTS = {"stale_report_fault", "tampered_snapshot", "unrelated_row_tamper",
+FAULTS = {"stale_report_fault", "tampered_snapshot", "unrelated_row_tamper", "provider_failure",
           "credit_unrelated_row_tamper", "credit_broken_policy"}
 
 
@@ -121,7 +121,7 @@ def test_evidence_for_a_replay_run(client):
     assert first["post_action_check"]["verdict"] == "eligible"
     [attempt] = first["recovery"]["attempts"]
     assert attempt["verification"]["verdict"] == "verified"
-    assert {c["id"] for c in attempt["verification"]["checks"]} >= {"restored_value", "ledger_snapshot_intact"}
+    assert {c["id"] for c in attempt["verification"]["checks"]} >= {"restored_value", "snapshot_matches_stored_digest", "before_differs_from_after"}
     assert evidence["final_state"]["customers/ACC-102"]["status"] == "Active"
 
 
@@ -187,7 +187,8 @@ def test_tampered_before_state_blocks_the_restore(client):
     assert response.status_code == 500
     data = response.json()["data"]
     assert data["verification"]["verdict"] == "failed"
-    assert [c["id"] for c in data["pre_commit_guard"]["checks"] if not c["passed"]] == ["ledger_snapshot_intact"]
+    assert [c["id"] for c in data["pre_commit_guard"]["checks"] if not c["passed"]] == [
+        "snapshot_matches_stored_digest", "before_differs_from_after"]
     assert snapshot() == customer_before
 
 

@@ -73,6 +73,15 @@ def execute(tool_name, arguments, run_id=None, actor="api", approves=None, appro
             pending = get_action(db, approves)
             if pending is None or pending["status"] != "pending_approval":
                 return _not_pending(approves, pending)
+            # Execute exactly what was approved, whatever the caller passed.
+            requested = adapter.args_model.model_validate(pending["arguments"])
+            if (pending["tool_name"] != tool_name or adapter.target_id(requested) != target_id
+                    or adapter.new_value(requested) != new_value):
+                return 409, error_body(
+                    "approval_mismatch", "Arguments do not match the pending action being approved",
+                    {"action_id": approves, "approved": {"tool": pending["tool_name"],
+                                                         **pending["arguments"]}},
+                )
 
         before = adapter.snapshot(db, target_id)
         if pending is not None and before != pending["before"]:
@@ -183,6 +192,27 @@ def execute(tool_name, arguments, run_id=None, actor="api", approves=None, appro
     if executed:
         return 200, envelope(data)
     return 500, envelope(data, error_obj("write_not_verified", reason))
+
+
+def apply_restore(db, adapter, action, current):
+    """The write half of Undo, kept here so every write to an adapter's table goes through
+    this module. recovery.undo() owns eligibility, the ledger row and the transaction.
+
+    Returns (restored, after, guard, others_before).
+    """
+    if not db.in_transaction:
+        raise RuntimeError("apply_restore must run inside the caller's BEGIN IMMEDIATE transaction")
+    target_id = current[adapter.key]
+    # Evidence for the post-commit unrelated-rows check, taken under the lock.
+    others_before = adapter.snapshot_unrelated(db, target_id)
+    db.execute("SAVEPOINT restore")
+    rowcount = adapter.restore(db, action, current)
+    guard = verification.guard_restore(adapter, db, action, others_before, rowcount)
+    restored = guard["verdict"] == "verified"
+    if not restored:
+        db.execute("ROLLBACK TO restore")
+    db.execute("RELEASE restore")
+    return restored, adapter.snapshot(db, target_id), guard, others_before
 
 
 def reject(action_id, actor, note=None):

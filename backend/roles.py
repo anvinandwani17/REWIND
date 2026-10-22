@@ -8,9 +8,12 @@ import os
 
 from fastapi import Header
 
+import demo
+
 ROLES = ("operator", "approver", "auditor")
 
-# Public demo values, not secrets. Override with REWIND_ROLE_KEYS.
+# Public demo values, not secrets: accepted only in demo mode. Outside it,
+# REWIND_ROLE_KEYS must be set or every role-gated route fails closed.
 DEFAULT_DEMO_KEYS = {
     "operator": "demo-operator-key",
     "approver": "demo-approver-key",
@@ -28,7 +31,7 @@ def role_keys():
     """REWIND_ROLE_KEYS="operator=k1,approver=k2,auditor=k3"; read per request."""
     raw = os.environ.get("REWIND_ROLE_KEYS")
     if not raw:
-        return DEFAULT_DEMO_KEYS
+        return DEFAULT_DEMO_KEYS if demo.demo_mode_enabled() else {}
     pairs = (part.split("=", 1) for part in raw.split(",") if "=" in part)
     return {role.strip(): key.strip() for role, key in pairs if role.strip() in ROLES}
 
@@ -39,7 +42,12 @@ def require(*allowed):
         if not x_role or not x_role_key:
             raise RoleError(401, "role_required", "Send X-Role and X-Role-Key headers",
                             {"roles": list(ROLES)})
-        expected = role_keys().get(x_role)
+        keys = role_keys()
+        if not keys:
+            raise RoleError(401, "role_keys_not_configured",
+                            "No role keys configured: set REWIND_ROLE_KEYS "
+                            "(the demo keys only work with REWIND_DEMO_MODE=1)")
+        expected = keys.get(x_role)
         if expected is None or not hmac.compare_digest(expected, x_role_key):
             raise RoleError(401, "invalid_role_key", "Unknown role or wrong key for that role")
         if x_role not in allowed:

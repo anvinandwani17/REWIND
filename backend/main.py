@@ -221,7 +221,8 @@ def lab_run(filter: str | None = Query(None, pattern=r"^[a-z0-9_]{1,64}$"), role
     try:
         report = json.loads(completed.stdout)
     except ValueError:
+        # stderr stays on the server: it can hold tracebacks and file paths. Reproduce with
+        # `python -m backend.scenarios` to see it.
         return respond((500, error_body("lab_failed", "The scenario lab did not produce a report",
-                                        {"exit_code": completed.returncode,
-                                         "stderr_tail": completed.stderr[-2000:]})))
+                                        {"exit_code": completed.returncode})))
     return envelope(report)

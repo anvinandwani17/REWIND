@@ -67,7 +67,7 @@ def _seconds(start, end):
 def _lab():
     path = lab_results_path()
     if not path.exists():
-        return {"available": False, "path": path.as_posix()}, None
+        return {"available": False, "file": path.name}, None
     try:
         run = json.loads(path.read_text(encoding="utf-8"))
         scenarios = run["scenarios"]
@@ -77,7 +77,7 @@ def _lab():
         )
         summary = {
             "available": True,
-            "path": path.as_posix(),
+            "file": path.name,
             "ran_at": run.get("ran_at"),
             "filter": run.get("filter"),
             "total": len(scenarios),
@@ -86,7 +86,7 @@ def _lab():
         }
         return summary, false_verified
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        return {"available": False, "path": path.as_posix(), "error": f"{type(exc).__name__}: {exc}"}, None
+        return {"available": False, "file": path.name, "error": type(exc).__name__}, None
 
 
 def compute(conn):

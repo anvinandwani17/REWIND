@@ -101,9 +101,9 @@ class Provider:
     """
     name = "provider"
     model = None
-    # False for providers that play fixed turns instead of calling a model; their runs
-    # are labelled mode "replay", never presented as a live model run.
-    live = True
+    # Only a provider that really calls a model sets live = True. Anything else (scripted
+    # turns, test doubles that forget to say) is labelled mode "replay", never "live".
+    live = False
 
     def next_turn(self, system, transcript, tool_definitions):
         raise NotImplementedError
@@ -111,6 +111,7 @@ class Provider:
 
 class AnthropicProvider(Provider):
     name = "anthropic"
+    live = True
 
     def __init__(self, model, api_key, timeout):
         # Optional dependency: only live runs with LLM_PROVIDER=anthropic need it.

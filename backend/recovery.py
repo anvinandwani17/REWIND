@@ -2,6 +2,7 @@
 from uuid import uuid4
 
 import adapters
+import gateway
 import verification
 from db import connect, transaction
 from ledger import get_action, get_executed_undo, now, record_action, set_recovery_state
@@ -117,19 +118,8 @@ def undo(action_id, actor="api"):
             )
             set_recovery_state(db, action_id, "conflict_detected")
         else:
-            target_id = current[adapter.key]
-            # Evidence for the post-commit unrelated-rows check, taken under the lock.
-            others_before = adapter.snapshot_unrelated(db, target_id)
-            db.execute("SAVEPOINT restore")
-            rowcount = adapter.restore(db, action, current)
-            guard = verification.guard_restore(adapter, db, action, others_before, rowcount)
-            restored = guard["verdict"] == "verified"
-            if not restored:
-                db.execute("ROLLBACK TO restore")
-            db.execute("RELEASE restore")
-
+            restored, after, guard, others_before = gateway.apply_restore(db, adapter, action, current)
             outcome = "recovered" if restored else "failed"
-            after = adapter.snapshot(db, target_id)
             reason = None if restored else "Pre-commit guard failed; restore rolled back"
             evidence = {f"other_{adapter.table}": others_before, "pre_commit_guard": guard}
             record_action(

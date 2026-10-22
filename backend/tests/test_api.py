@@ -12,6 +12,8 @@ import tools
 
 UPDATE = "/api/tools/update-customer-status"
 OPERATOR = {"X-Role": "operator", "X-Role-Key": "demo-operator-key"}
+# Explicitly configured keys (same strings) for tests that turn demo mode off.
+CONFIGURED_KEYS = "operator=demo-operator-key,approver=demo-approver-key,auditor=demo-auditor-key"
 
 
 @pytest.fixture
@@ -108,6 +110,7 @@ def test_reset_refused_when_demo_mode_off(client, monkeypatch):
     archive(client, "ACC-102")
     before = snapshot()
     monkeypatch.delenv("REWIND_DEMO_MODE")
+    monkeypatch.setenv("REWIND_ROLE_KEYS", CONFIGURED_KEYS)  # demo keys need demo mode
 
     response = client.post("/api/demo/reset")
     assert response.status_code == 403
@@ -234,6 +237,7 @@ def test_injected_fault_disables_only_recent_activity_and_is_labelled(client, mo
 def test_injected_fault_flag_ignored_outside_demo_mode(client, monkeypatch):
     monkeypatch.setenv("REWIND_FAULT_DISABLE_RECENT_ACTIVITY", "1")
     monkeypatch.delenv("REWIND_DEMO_MODE")
+    monkeypatch.setenv("REWIND_ROLE_KEYS", CONFIGURED_KEYS)  # demo keys need demo mode
     monkeypatch.setenv("REWIND_RECENT_ACTIVITY_DAYS", "100000")  # real clock: block everyone
 
     response = archive(client, "ACC-101")
@@ -361,7 +365,8 @@ def test_undo_restores_and_bumps_version(client):
     assert body["verification"]["stage"] == "post_commit"
     assert {c["id"] for c in body["verification"]["checks"]} == {
         "restored_value", "version_transition", "ledger_consistency",
-        "ledger_snapshot_intact", "db_integrity", "unrelated_rows_unchanged",
+        "snapshot_matches_stored_digest", "before_differs_from_after", "db_integrity",
+        "unrelated_rows_unchanged",
     }
     assert all(c["passed"] for c in body["verification"]["checks"])
     assert (body["before"]["status"], body["before"]["version"]) == ("Archived", 2)

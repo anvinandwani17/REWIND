@@ -59,12 +59,21 @@ def _valid_snapshot(adapter, snapshot, target_id):
 
 # --- pre-commit guards ----------------------------------------------------------
 
-def _snapshot_intact(action):
-    return _check(
-        "ledger_snapshot_intact",
-        "The action's stored before/after snapshots still match the digest recorded when it was written",
-        action["snapshot_sha256"], ledger.snapshot_digest(action["before"], action["after"]),
-    )
+def _snapshot_checks(adapter, action):
+    """What can be checked about the stored restore target. The digest lives in the same
+    ledger row, so it catches an edit to the snapshots alone, not one that rewrites both."""
+    field = adapter.field
+    before_value, after_value = action["before"][field], action["after"][field]
+    return [
+        _check("snapshot_matches_stored_digest",
+               "Stored before/after snapshots match the SHA-256 stored in the same ledger row when it "
+               "was written (an edit that also rewrites that digest is not detectable from this row)",
+               action["snapshot_sha256"], ledger.snapshot_digest(action["before"], action["after"])),
+        _check("before_differs_from_after",
+               f"Stored before-state {field} differs from the stored after-state {field}: every executed "
+               "change changes it, so equal values mean the restore target cannot be trusted",
+               {"differs": True}, {"differs": before_value != after_value}),
+    ]
 
 
 def _guard(adapter, db, target_id, rowcount, expected_value, expected_version, others_before, what,
@@ -101,10 +110,10 @@ def guard_update(adapter, db, before, new_value, others_before, rowcount):
 
 
 def guard_restore(adapter, db, action, others_before, rowcount):
-    # A restore writes the stored before-state, so that state must be untampered.
+    # A restore writes the stored before-state, so that state must be checked first.
     return _guard(adapter, db, action["account_id"], rowcount, action["before"][adapter.field],
                   action["after_version"] + 1, others_before, "undo restore",
-                  extra_checks=[_snapshot_intact(action)])
+                  extra_checks=_snapshot_checks(adapter, action))
 
 
 # --- post-commit verifier -----------------------------------------------------------
@@ -148,7 +157,7 @@ def _verify_restore(adapter, db, attempt, original, current):
                after_version + 1, current["version"] if current else None),
         _ledger(attempt, original, "executed", "recovered",
                 {"before_version": after_version, "after_version": after_version + 1}),
-        _snapshot_intact(original),
+        *_snapshot_checks(adapter, original),
         _integrity(db),
     ]
     stored = (attempt["evidence"] or {}).get(f"other_{adapter.table}")

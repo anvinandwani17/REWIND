@@ -95,7 +95,9 @@ def load_credit_limit_policy():
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
         return CreditLimitPolicy.model_validate(document["credit_limit"]), None
     except Exception as exc:  # missing file, bad YAML, wrong shape: all mean "no valid policy"
-        return None, f"{type(exc).__name__}: {exc}"
+        # Type only: the message can contain server file paths, and this text is returned to
+        # clients and stored in the ledger as the block reason.
+        return None, type(exc).__name__
 
 
 def evaluate_credit_limit(before, new_limit, *, protected, policy, policy_error):

@@ -281,7 +281,7 @@ def tampered_snapshot(account):
                 "guard_failed_checks": failed_check_ids(data["pre_commit_guard"]),
                 "customer_unchanged": row("customers", account) == customer}
     return {"undo_http": 500, "undo_status": "failed", "verdict": "failed",
-            "guard_failed_checks": ["ledger_snapshot_intact"], "customer_unchanged": True}, run
+            "guard_failed_checks": ["before_differs_from_after", "snapshot_matches_stored_digest"], "customer_unchanged": True}, run
 
 
 def tamper_during_recovery(route, body, table, tamper_sql, bystander):
@@ -434,8 +434,8 @@ def scenarios(workdir):
         ("malformed_tool_call", NORMAL, "customer_status",
          "Scripted model turns send malformed arguments twice; rejected, nothing written",
          malformed_tool_call(eligible)),
-        ("provider_failure", NORMAL, "customer_status",
-         "Scripted model turns fail mid-run; the ledger holds exactly what executed",
+        ("provider_failure", FAULT, "customer_status",
+         "INJECTED FAULT: the scripted provider raises mid-run; the ledger holds exactly what executed",
          provider_failure(eligible)),
         ("second_customer", NORMAL, "customer_status",
          "clean_archive on a different eligible account: nothing is hardcoded",

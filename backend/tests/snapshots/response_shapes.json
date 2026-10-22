@@ -724,7 +724,7 @@
         },
         "lab": {
           "available": "bool",
-          "path": "str"
+          "file": "str"
         },
         "measured_at": "str",
         "recoveries": {
