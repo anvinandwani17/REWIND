@@ -28,8 +28,8 @@ Send `X-Role` and `X-Role-Key` on every write. This is a demo role gate, **not**
 
 | Role | May call |
 |---|---|
-| (none) | `GET /api/customers`, `GET /api/credit-lines`, `GET /api/actions`, `GET /api/actions/{action_id}`, `GET /api/metrics` |
-| `operator` | `POST /api/tools/update-customer-status`, `POST /api/tools/update-credit-limit`, `POST /api/actions/{action_id}/undo`, `POST /api/demo/reset`, `POST /api/agent/runs` |
+| (none) | `GET /api/customers`, `GET /api/credit-lines`, `GET /api/actions`, `GET /api/actions/{action_id}`, `GET /api/metrics`, `GET /api/runs/{run_id}/evidence` |
+| `operator` | `POST /api/tools/update-customer-status`, `POST /api/tools/update-credit-limit`, `POST /api/actions/{action_id}/undo`, `POST /api/demo/reset`, `POST /api/agent/runs`, `POST /api/lab/run` |
 | `approver` | `POST /api/actions/{action_id}/approve`, `POST /api/actions/{action_id}/reject` |
 | `auditor` | `GET /api/audit/export` |
 
@@ -118,12 +118,13 @@ Read on every request. If the file is missing, invalid YAML, or has the wrong ke
 | `POST /api/tools/update-credit-limit` | 404 | `credit_line_not_found` | No credit line for the account |
 | `GET /api/actions` | 200 | — | List actions |
 | `GET /api/metrics` | 200 | — | Metrics (no saved lab run) |
-| `GET /api/runs/run-1/evidence` | 501 | `not_implemented` | Reserved: run evidence |
 | `GET /api/nope` | 404 | `route_not_found` | Unknown route |
 | `POST /api/demo/reset` | 403 | `demo_mode_off` | Reset with demo mode off |
 | `POST /api/agent/runs` | 200 | — | Replay run: archive inactive customers |
 | `POST /api/agent/runs` | 200 | — | Replay run stopped by a policy block |
 | `POST /api/agent/runs` | 503 | `provider_not_configured` | Live run with no provider configured |
+| `GET /api/runs/run-00000000-0000-4000-8000-000000000019/evidence` | 200 | — | Evidence for the replay run (after undoing its first action) |
+| `GET /api/runs/nope/evidence` | 404 | `run_not_found` | Evidence for an unknown run |
 
 ## Configuration (env vars)
 
@@ -494,6 +495,36 @@ Response `200`:
           "passed": true
         }
       ]
+    },
+    "post_action_check": {
+      "verdict": "eligible",
+      "stage": "post_action",
+      "scope": "After commit, on a new SQLite connection: re-checked whether customer ACC-102 was eligible to archive (inactivity threshold and protection) against its current row.",
+      "checks": [
+        {
+          "id": "inactive_beyond_threshold",
+          "description": "Last activity 591 days ago; the archive rule requires 90+ (recent_activity), re-checked on current data with injected faults ignored",
+          "expected": {
+            "meets_threshold": true
+          },
+          "actual": {
+            "meets_threshold": true
+          },
+          "passed": true
+        },
+        {
+          "id": "not_protected",
+          "description": "Customer is not protected",
+          "expected": {
+            "protected": false
+          },
+          "actual": {
+            "protected": false
+          },
+          "passed": true
+        }
+      ],
+      "checked_at": "2026-10-22T12:00:02+00:00"
     }
   },
   "error": null
@@ -848,7 +879,7 @@ Response `200`:
 {
   "data": {
     "id": "00000000-0000-4000-8000-000000000012",
-    "created_at": "2026-10-22T12:00:14+00:00",
+    "created_at": "2026-10-22T12:00:17+00:00",
     "actor": "operator",
     "tool_name": "update_customer_status",
     "arguments": {
@@ -934,9 +965,41 @@ Response `200`:
     "approval": {
       "decision": "approved",
       "role": "approver",
-      "at": "2026-10-22T12:00:15+00:00",
+      "at": "2026-10-22T12:00:18+00:00",
       "note": "Checked the account history"
     },
+    "post_action_check": {
+      "verdict": "eligible",
+      "stage": "post_action",
+      "scope": "After commit, on a new SQLite connection: re-checked whether customer ACC-102 was eligible to archive (inactivity threshold and protection) against its current row.",
+      "checks": [
+        {
+          "id": "inactive_beyond_threshold",
+          "description": "Last activity 591 days ago; the archive rule requires 90+ (recent_activity), re-checked on current data with injected faults ignored",
+          "expected": {
+            "meets_threshold": true
+          },
+          "actual": {
+            "meets_threshold": true
+          },
+          "passed": true
+        },
+        {
+          "id": "not_protected",
+          "description": "Customer is not protected",
+          "expected": {
+            "protected": false
+          },
+          "actual": {
+            "protected": false
+          },
+          "passed": true
+        }
+      ],
+      "checked_at": "2026-10-22T12:00:19+00:00"
+    },
+    "flag": null,
+    "snapshot_sha256": "cc522e9b49b9d2348a3a535404a1f44582e06ff13b61a916a4c8f1548bdc069c",
     "recovered_at": null,
     "undo_available": true,
     "undo_disabled_reason": null
@@ -990,7 +1053,7 @@ Response `200`:
 {
   "data": {
     "id": "00000000-0000-4000-8000-000000000013",
-    "created_at": "2026-10-22T12:00:16+00:00",
+    "created_at": "2026-10-22T12:00:20+00:00",
     "actor": "operator",
     "tool_name": "update_customer_status",
     "arguments": {
@@ -1036,9 +1099,12 @@ Response `200`:
     "approval": {
       "decision": "rejected",
       "role": "approver",
-      "at": "2026-10-22T12:00:17+00:00",
+      "at": "2026-10-22T12:00:21+00:00",
       "note": "Not this week"
     },
+    "post_action_check": null,
+    "flag": null,
+    "snapshot_sha256": "bc0316038eda4030d6c000d62185879c4792421e1efa361e0daa2684a96769d2",
     "recovered_at": null,
     "undo_available": false,
     "undo_disabled_reason": "Action was denied; there is no change to undo"
@@ -1064,7 +1130,7 @@ Response `200`:
 ```json
 {
   "data": {
-    "exported_at": "2026-10-22T12:00:18+00:00",
+    "exported_at": "2026-10-22T12:00:22+00:00",
     "exported_by_role": "auditor",
     "pii_masked": true,
     "integrity_check": "ok",
@@ -1107,10 +1173,13 @@ Response `200`:
         "approval": {
           "decision": "rejected",
           "role": "approver",
-          "at": "2026-10-22T12:00:17+00:00",
+          "at": "2026-10-22T12:00:21+00:00",
           "note": "Not this week"
         },
-        "created_at": "2026-10-22T12:00:16+00:00",
+        "post_action_check": null,
+        "flag": null,
+        "snapshot_sha256": "bc0316038eda4030d6c000d62185879c4792421e1efa361e0daa2684a96769d2",
+        "created_at": "2026-10-22T12:00:20+00:00",
         "recovered_at": null,
         "actor": "operator",
         "decision": "require_approval",
@@ -1362,7 +1431,8 @@ Response `200`:
           "passed": true
         }
       ]
-    }
+    },
+    "post_action_check": null
   },
   "error": null
 }
@@ -1438,6 +1508,13 @@ Response `200`:
           "passed": true
         },
         {
+          "id": "ledger_snapshot_intact",
+          "description": "The action's stored before/after snapshots still match the digest recorded when it was written",
+          "expected": "5be3670c4c56b2f9390aeea0c2354469a3a330a39c76da4f7dd579890168e63b",
+          "actual": "5be3670c4c56b2f9390aeea0c2354469a3a330a39c76da4f7dd579890168e63b",
+          "passed": true
+        },
+        {
           "id": "db_integrity",
           "description": "PRAGMA integrity_check on a new connection",
           "expected": "ok",
@@ -1458,7 +1535,7 @@ Response `200`:
           "passed": true
         }
       ],
-      "checked_at": "2026-10-22T12:00:22+00:00"
+      "checked_at": "2026-10-22T12:00:26+00:00"
     }
   },
   "error": null
@@ -1607,7 +1684,7 @@ Response `200`:
   "data": [
     {
       "id": "00000000-0000-4000-8000-000000000018",
-      "created_at": "2026-10-22T12:00:25+00:00",
+      "created_at": "2026-10-22T12:00:29+00:00",
       "actor": "operator",
       "tool_name": "update_credit_limit",
       "arguments": {
@@ -1635,6 +1712,9 @@ Response `200`:
       "evidence": null,
       "recovery_verification": null,
       "approval": null,
+      "post_action_check": null,
+      "flag": null,
+      "snapshot_sha256": "1510fc60ef116c399def08435dabb6b5cb03cfad053e97c7f88a762dbdde06ee",
       "recovered_at": null,
       "undo_available": false,
       "undo_disabled_reason": "Action was rejected; there is no change to undo"
@@ -1742,6 +1822,38 @@ Response `200`:
     "evidence": null,
     "recovery_verification": null,
     "approval": null,
+    "post_action_check": {
+      "verdict": "eligible",
+      "stage": "post_action",
+      "scope": "After commit, on a new SQLite connection: re-checked whether customer ACC-102 was eligible to archive (inactivity threshold and protection) against its current row.",
+      "checks": [
+        {
+          "id": "inactive_beyond_threshold",
+          "description": "Last activity 591 days ago; the archive rule requires 90+ (recent_activity), re-checked on current data with injected faults ignored",
+          "expected": {
+            "meets_threshold": true
+          },
+          "actual": {
+            "meets_threshold": true
+          },
+          "passed": true
+        },
+        {
+          "id": "not_protected",
+          "description": "Customer is not protected",
+          "expected": {
+            "protected": false
+          },
+          "actual": {
+            "protected": false
+          },
+          "passed": true
+        }
+      ],
+      "checked_at": "2026-10-22T12:00:02+00:00"
+    },
+    "flag": null,
+    "snapshot_sha256": "45393dc4a75b8afd2b62478f1a012d40f1b3a78ad1d36802207b6ea4de6a7b9f",
     "recovered_at": null,
     "undo_available": true,
     "undo_disabled_reason": null
@@ -1764,7 +1876,7 @@ Response `200`:
 {
   "data": {
     "id": "00000000-0000-4000-8000-000000000008",
-    "created_at": "2026-10-22T12:00:09+00:00",
+    "created_at": "2026-10-22T12:00:10+00:00",
     "actor": "operator",
     "tool_name": "update_customer_status",
     "arguments": {
@@ -1848,6 +1960,38 @@ Response `200`:
     "evidence": null,
     "recovery_verification": null,
     "approval": null,
+    "post_action_check": {
+      "verdict": "eligible",
+      "stage": "post_action",
+      "scope": "After commit, on a new SQLite connection: re-checked whether customer ACC-105 was eligible to archive (inactivity threshold and protection) against its current row.",
+      "checks": [
+        {
+          "id": "inactive_beyond_threshold",
+          "description": "Last activity 420 days ago; the archive rule requires 90+ (recent_activity), re-checked on current data with injected faults ignored",
+          "expected": {
+            "meets_threshold": true
+          },
+          "actual": {
+            "meets_threshold": true
+          },
+          "passed": true
+        },
+        {
+          "id": "not_protected",
+          "description": "Customer is not protected",
+          "expected": {
+            "protected": false
+          },
+          "actual": {
+            "protected": false
+          },
+          "passed": true
+        }
+      ],
+      "checked_at": "2026-10-22T12:00:11+00:00"
+    },
+    "flag": null,
+    "snapshot_sha256": "95d7dfa745009d1395a859d42b342e324984e27d1c8b896514cd7091858b3f91",
     "recovered_at": null,
     "undo_available": false,
     "undo_disabled_reason": "Customer changed since this action; Undo would overwrite a newer edit"
@@ -1934,6 +2078,13 @@ Response `200`:
           "passed": true
         },
         {
+          "id": "ledger_snapshot_intact",
+          "description": "The action's stored before/after snapshots still match the digest recorded when it was written",
+          "expected": "45393dc4a75b8afd2b62478f1a012d40f1b3a78ad1d36802207b6ea4de6a7b9f",
+          "actual": "45393dc4a75b8afd2b62478f1a012d40f1b3a78ad1d36802207b6ea4de6a7b9f",
+          "passed": true
+        },
+        {
           "id": "db_integrity",
           "description": "PRAGMA integrity_check on a new connection",
           "expected": "ok",
@@ -1954,7 +2105,7 @@ Response `200`:
           "passed": true
         }
       ],
-      "checked_at": "2026-10-22T12:00:04+00:00"
+      "checked_at": "2026-10-22T12:00:05+00:00"
     }
   },
   "error": null
@@ -2037,6 +2188,13 @@ Response `200`:
           "passed": true
         },
         {
+          "id": "ledger_snapshot_intact",
+          "description": "The action's stored before/after snapshots still match the digest recorded when it was written",
+          "expected": "45393dc4a75b8afd2b62478f1a012d40f1b3a78ad1d36802207b6ea4de6a7b9f",
+          "actual": "45393dc4a75b8afd2b62478f1a012d40f1b3a78ad1d36802207b6ea4de6a7b9f",
+          "passed": true
+        },
+        {
           "id": "db_integrity",
           "description": "PRAGMA integrity_check on a new connection",
           "expected": "ok",
@@ -2057,7 +2215,7 @@ Response `200`:
           "passed": true
         }
       ],
-      "checked_at": "2026-10-22T12:00:04+00:00"
+      "checked_at": "2026-10-22T12:00:05+00:00"
     }
   },
   "error": null
@@ -2158,7 +2316,7 @@ Response `409`:
           "passed": true
         }
       ],
-      "checked_at": "2026-10-22T12:00:12+00:00"
+      "checked_at": "2026-10-22T12:00:14+00:00"
     }
   },
   "error": {
@@ -2230,7 +2388,7 @@ Response `404`:
 
 ### `GET /api/metrics`
 
-Measured from the ledger and the last saved lab run (`python backend/lab.py` writes `backend/data/lab_last_run.json`). Values that cannot be measured are `null`. `assumptions` lists every definition used; read it before quoting a number. `false_verified.count` must be 0.
+Measured from the ledger and the last saved lab report (`python -m backend.scenarios` or `POST /api/lab/run` writes `backend/data/lab_report.json`). Values that cannot be measured are `null`. `assumptions` lists every definition used; read it before quoting a number. `false_verified.count` must be 0.
 
 #### Metrics (no saved lab run)
 
@@ -2245,7 +2403,7 @@ Response `200`:
 ```json
 {
   "data": {
-    "measured_at": "2026-10-22T12:00:26+00:00",
+    "measured_at": "2026-10-22T12:00:30+00:00",
     "actions": {
       "total": 14,
       "executed": 6,
@@ -2280,18 +2438,18 @@ Response `200`:
     },
     "lab": {
       "available": false,
-      "path": "no-lab-run-saved\\lab_last_run.json"
+      "path": "no-lab-run-saved/lab_report.json"
     },
     "assumptions": [
       "actions.* counts forward actions only (every ledger row whose tool is not 'undo'); actions.by_status has the full breakdown.",
       "actions.executed = status 'executed' (includes approved-then-executed); actions.blocked = status 'blocked' (policy blocks).",
-      "actions.flagged = forward actions for which at least one Undo was requested. The ledger has no separate 'flag' event, so requesting Undo is treated as flagging the action as wrong. Flagged overlaps executed.",
+      "actions.flagged = forward actions the post-action eligibility check marked flagged_unsafe, or for which an Undo was requested (either counts as flagging the action as wrong). Flagged overlaps executed.",
       "recoveries.* counts every Undo attempt row by its stored post-commit verdict; 'unverified' means no verdict was stored.",
-      "time_to_verified_recovery: from the first Undo attempt on an action (its ledger created_at) to verification.checked_at of the attempt whose stored verdict is 'verified'. Recoveries without a stored checked_at (older rows) are counted in excluded_no_timestamp, not estimated.",
+      "time_to_verified_recovery: from the moment an action was flagged - the earlier of its flagged_unsafe post_action_check.checked_at and its first Undo attempt's created_at - to verification.checked_at of the attempt whose stored verdict is 'verified'. Recoveries without a stored checked_at (older rows) are counted in excluded_no_timestamp, not estimated.",
       "false_verified.ledger = Undo rows whose stored verdict is 'verified' but whose own evidence does not support it (a required check missing, any check not passed, expected != actual, or stage not post_commit). It checks the stored evidence; it does not re-read current data.",
-      "false_verified.lab = scenarios in the last saved lab run whose actual outcome says 'verified' when the expected outcome does not. null when no lab run is saved.",
+      "false_verified.lab = scenarios in the last saved lab report whose actual 'verdict' is 'verified' when the expected 'verdict' is not. null when no lab report is saved.",
       "false_verified.count = ledger + lab (lab counted only when a lab run is saved). It must be 0.",
-      "lab.* comes from the file the lab CLI writes (python backend/lab.py), not from this database."
+      "lab.* comes from the report the scenario lab writes (python -m backend.scenarios or POST /api/lab/run), not from this database."
     ]
   },
   "error": null
@@ -2534,26 +2692,462 @@ Response `503`:
 }
 ```
 
-### Reserved (not implemented yet)
+### `GET /api/runs/{run_id}/evidence`
 
-#### Reserved: run evidence
+Everything recorded about one run, read back from SQLite: the instruction and steps (names and phones masked), and for each ledger row its tool args, policy decision, before/after, pre-commit guard, post-action check and `flag`, every recovery attempt with its verification checks, and the current (`final_state`) row of everything the run touched. `recorded_run: false` means the `run_id` only exists on ledger rows written outside an agent run.
+
+#### Evidence for the replay run (after undoing its first action)
 
 ```http
-GET /api/runs/run-1/evidence
+GET /api/runs/run-00000000-0000-4000-8000-000000000019/evidence
 ```
 
-Response `501`:
+Response `200`:
+
+```json
+{
+  "data": {
+    "run_id": "run-00000000-0000-4000-8000-000000000019",
+    "recorded_run": true,
+    "instruction": "Archive every customer who has been inactive for more than a year.",
+    "mode": "replay",
+    "status": "completed",
+    "scenario": "archive_inactive",
+    "provider": null,
+    "steps": [
+      {
+        "index": 1,
+        "tool": "get_inactivity_report",
+        "args": {
+          "min_inactive_days": 365
+        },
+        "mode": "replay",
+        "outcome": "ok",
+        "result_summary": "4 of 8 customers inactive for 365+ days: ACC-102, ACC-103, ACC-105, ACC-107",
+        "action_id": null,
+        "http_status": null
+      },
+      {
+        "index": 2,
+        "tool": "get_customer",
+        "args": {
+          "account_id": "ACC-102"
+        },
+        "mode": "replay",
+        "outcome": "ok",
+        "result_summary": "ACC-102: status Active, version 1, protected False",
+        "action_id": null,
+        "http_status": null
+      },
+      {
+        "index": 3,
+        "tool": "update_customer_status",
+        "args": {
+          "account_id": "ACC-102",
+          "new_status": "Archived",
+          "reason": "Inactive 591 days per the inactivity report (threshold 365)",
+          "expected_version": 1
+        },
+        "mode": "replay",
+        "outcome": "executed",
+        "result_summary": "executed: ACC-102 Active -> Archived (version 2)",
+        "action_id": "00000000-0000-4000-8000-000000000020",
+        "http_status": 200
+      },
+      {
+        "index": 4,
+        "tool": "get_customer",
+        "args": {
+          "account_id": "ACC-105"
+        },
+        "mode": "replay",
+        "outcome": "ok",
+        "result_summary": "ACC-105: status Active, version 1, protected False",
+        "action_id": null,
+        "http_status": null
+      },
+      {
+        "index": 5,
+        "tool": "update_customer_status",
+        "args": {
+          "account_id": "ACC-105",
+          "new_status": "Archived",
+          "reason": "Inactive 420 days per the inactivity report (threshold 365)",
+          "expected_version": 1
+        },
+        "mode": "replay",
+        "outcome": "executed",
+        "result_summary": "executed: ACC-105 Active -> Archived (version 2)",
+        "action_id": "00000000-0000-4000-8000-000000000021",
+        "http_status": 200
+      }
+    ],
+    "final_summary": "Run completed: the run finished. Ledger for run-00000000-0000-4000-8000-000000000019: 2 executed. executed ACC-102 Active -> Archived; executed ACC-105 Active -> Archived.",
+    "actions": [
+      {
+        "action_id": "00000000-0000-4000-8000-000000000020",
+        "tool": "update_customer_status",
+        "args": {
+          "account_id": "ACC-102",
+          "new_status": "Archived",
+          "reason": "Inactive 591 days per the inactivity report (threshold 365)",
+          "expected_version": 1
+        },
+        "actor": "agent",
+        "mode": "replay",
+        "scenario": null,
+        "status": "executed",
+        "policy": {
+          "decision": "allow",
+          "rule_id": "default_allow",
+          "reason": null,
+          "risk": "medium"
+        },
+        "approval": null,
+        "before": {
+          "account_id": "ACC-102",
+          "name": "Meera Iyer",
+          "phone": "+91 90000 00102",
+          "status": "Active",
+          "last_activity_at": "2025-03-10T12:00:00Z",
+          "protected": false,
+          "version": 1
+        },
+        "after": {
+          "account_id": "ACC-102",
+          "name": "Meera Iyer",
+          "phone": "+91 90000 00102",
+          "status": "Archived",
+          "last_activity_at": "2025-03-10T12:00:00Z",
+          "protected": false,
+          "version": 2
+        },
+        "pre_commit_guard": {
+          "verdict": "verified",
+          "stage": "pre_commit_guard",
+          "scope": "Pre-commit guard for the status update of customer ACC-102, inside the write transaction: UPDATE row count, the row's status and version as re-read in that transaction, and a hash of all other rows in customers table. Committed data is not re-read here.",
+          "checks": [
+            {
+              "id": "one_row_updated",
+              "description": "The status update UPDATE changed exactly one customers row",
+              "expected": 1,
+              "actual": 1,
+              "passed": true
+            },
+            {
+              "id": "status_written",
+              "description": "Target row's status, re-read inside the same transaction",
+              "expected": "Archived",
+              "actual": "Archived",
+              "passed": true
+            },
+            {
+              "id": "version_incremented_by_one",
+              "description": "Target row's version, re-read inside the same transaction",
+              "expected": 2,
+              "actual": 2,
+              "passed": true
+            },
+            {
+              "id": "other_customers_unchanged_in_transaction",
+              "description": "Count and SHA-256 of all other rows in customers table, before vs after the UPDATE, inside the same transaction",
+              "expected": {
+                "row_count": 7,
+                "sha256": "9184d95c3ac112505ab19af7dd77fef0d809aa254b7f9d2636250ad1e01057f9"
+              },
+              "actual": {
+                "row_count": 7,
+                "sha256": "9184d95c3ac112505ab19af7dd77fef0d809aa254b7f9d2636250ad1e01057f9"
+              },
+              "passed": true
+            }
+          ]
+        },
+        "post_action_check": {
+          "verdict": "eligible",
+          "stage": "post_action",
+          "scope": "After commit, on a new SQLite connection: re-checked whether customer ACC-102 was eligible to archive (inactivity threshold and protection) against its current row.",
+          "checks": [
+            {
+              "id": "inactive_beyond_threshold",
+              "description": "Last activity 591 days ago; the archive rule requires 90+ (recent_activity), re-checked on current data with injected faults ignored",
+              "expected": {
+                "meets_threshold": true
+              },
+              "actual": {
+                "meets_threshold": true
+              },
+              "passed": true
+            },
+            {
+              "id": "not_protected",
+              "description": "Customer is not protected",
+              "expected": {
+                "protected": false
+              },
+              "actual": {
+                "protected": false
+              },
+              "passed": true
+            }
+          ],
+          "checked_at": "2026-10-22T12:00:32+00:00"
+        },
+        "flag": null,
+        "recovery": {
+          "state": "recovered",
+          "recovered_at": "2026-10-22T12:00:39+00:00",
+          "attempts": [
+            {
+              "undo_action_id": "00000000-0000-4000-8000-000000000024",
+              "created_at": "2026-10-22T12:00:38+00:00",
+              "actor": "operator",
+              "status": "executed",
+              "reason": null,
+              "verification": {
+                "verdict": "verified",
+                "stage": "post_commit",
+                "scope": "After commit, on a new SQLite connection: checked customer ACC-102's status and version, the undo ledger row and the original action's recovery_state, and PRAGMA integrity_check, and compared a hash of all other rows in customers table with the one stored just before the restore.",
+                "checks": [
+                  {
+                    "id": "restored_value",
+                    "description": "Customer status now equals the action's before-state status",
+                    "expected": "Active",
+                    "actual": "Active",
+                    "passed": true
+                  },
+                  {
+                    "id": "version_transition",
+                    "description": "Customer version now equals after_version + 1",
+                    "expected": 3,
+                    "actual": 3,
+                    "passed": true
+                  },
+                  {
+                    "id": "ledger_consistency",
+                    "description": "Undo ledger row read back on a new connection (so it is committed), references the original action, and the original's recovery_state matches",
+                    "expected": {
+                      "tool_name": "undo",
+                      "status": "executed",
+                      "undo_of_action_id": "00000000-0000-4000-8000-000000000020",
+                      "original_recovery_state": "recovered",
+                      "before_version": 2,
+                      "after_version": 3
+                    },
+                    "actual": {
+                      "tool_name": "undo",
+                      "status": "executed",
+                      "undo_of_action_id": "00000000-0000-4000-8000-000000000020",
+                      "original_recovery_state": "recovered",
+                      "before_version": 2,
+                      "after_version": 3
+                    },
+                    "passed": true
+                  },
+                  {
+                    "id": "ledger_snapshot_intact",
+                    "description": "The action's stored before/after snapshots still match the digest recorded when it was written",
+                    "expected": "45393dc4a75b8afd2b62478f1a012d40f1b3a78ad1d36802207b6ea4de6a7b9f",
+                    "actual": "45393dc4a75b8afd2b62478f1a012d40f1b3a78ad1d36802207b6ea4de6a7b9f",
+                    "passed": true
+                  },
+                  {
+                    "id": "db_integrity",
+                    "description": "PRAGMA integrity_check on a new connection",
+                    "expected": "ok",
+                    "actual": "ok",
+                    "passed": true
+                  },
+                  {
+                    "id": "unrelated_rows_unchanged",
+                    "description": "Count and SHA-256 of all other rows in customers table (excluding ACC-102): stored inside the recovery transaction just before the restore vs recomputed now",
+                    "expected": {
+                      "row_count": 7,
+                      "sha256": "46aa6cd16ca8b9fa70a5a6ff1f3185643a85431f21e3e627f8c3dd2897b31676"
+                    },
+                    "actual": {
+                      "row_count": 7,
+                      "sha256": "46aa6cd16ca8b9fa70a5a6ff1f3185643a85431f21e3e627f8c3dd2897b31676"
+                    },
+                    "passed": true
+                  }
+                ],
+                "checked_at": "2026-10-22T12:00:40+00:00"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "action_id": "00000000-0000-4000-8000-000000000021",
+        "tool": "update_customer_status",
+        "args": {
+          "account_id": "ACC-105",
+          "new_status": "Archived",
+          "reason": "Inactive 420 days per the inactivity report (threshold 365)",
+          "expected_version": 1
+        },
+        "actor": "agent",
+        "mode": "replay",
+        "scenario": null,
+        "status": "executed",
+        "policy": {
+          "decision": "allow",
+          "rule_id": "default_allow",
+          "reason": null,
+          "risk": "medium"
+        },
+        "approval": null,
+        "before": {
+          "account_id": "ACC-105",
+          "name": "Kabir Mehta",
+          "phone": "+91 90000 00105",
+          "status": "Active",
+          "last_activity_at": "2025-08-28T12:00:00Z",
+          "protected": false,
+          "version": 1
+        },
+        "after": {
+          "account_id": "ACC-105",
+          "name": "Kabir Mehta",
+          "phone": "+91 90000 00105",
+          "status": "Archived",
+          "last_activity_at": "2025-08-28T12:00:00Z",
+          "protected": false,
+          "version": 2
+        },
+        "pre_commit_guard": {
+          "verdict": "verified",
+          "stage": "pre_commit_guard",
+          "scope": "Pre-commit guard for the status update of customer ACC-105, inside the write transaction: UPDATE row count, the row's status and version as re-read in that transaction, and a hash of all other rows in customers table. Committed data is not re-read here.",
+          "checks": [
+            {
+              "id": "one_row_updated",
+              "description": "The status update UPDATE changed exactly one customers row",
+              "expected": 1,
+              "actual": 1,
+              "passed": true
+            },
+            {
+              "id": "status_written",
+              "description": "Target row's status, re-read inside the same transaction",
+              "expected": "Archived",
+              "actual": "Archived",
+              "passed": true
+            },
+            {
+              "id": "version_incremented_by_one",
+              "description": "Target row's version, re-read inside the same transaction",
+              "expected": 2,
+              "actual": 2,
+              "passed": true
+            },
+            {
+              "id": "other_customers_unchanged_in_transaction",
+              "description": "Count and SHA-256 of all other rows in customers table, before vs after the UPDATE, inside the same transaction",
+              "expected": {
+                "row_count": 7,
+                "sha256": "1a0ef8dff4308bdc910877dbe203eb4f66d681042eb7dab964765f2eeb8117ed"
+              },
+              "actual": {
+                "row_count": 7,
+                "sha256": "1a0ef8dff4308bdc910877dbe203eb4f66d681042eb7dab964765f2eeb8117ed"
+              },
+              "passed": true
+            }
+          ]
+        },
+        "post_action_check": {
+          "verdict": "eligible",
+          "stage": "post_action",
+          "scope": "After commit, on a new SQLite connection: re-checked whether customer ACC-105 was eligible to archive (inactivity threshold and protection) against its current row.",
+          "checks": [
+            {
+              "id": "inactive_beyond_threshold",
+              "description": "Last activity 420 days ago; the archive rule requires 90+ (recent_activity), re-checked on current data with injected faults ignored",
+              "expected": {
+                "meets_threshold": true
+              },
+              "actual": {
+                "meets_threshold": true
+              },
+              "passed": true
+            },
+            {
+              "id": "not_protected",
+              "description": "Customer is not protected",
+              "expected": {
+                "protected": false
+              },
+              "actual": {
+                "protected": false
+              },
+              "passed": true
+            }
+          ],
+          "checked_at": "2026-10-22T12:00:34+00:00"
+        },
+        "flag": null,
+        "recovery": {
+          "state": "available",
+          "recovered_at": null,
+          "attempts": []
+        }
+      }
+    ],
+    "final_state": {
+      "customers/ACC-102": {
+        "account_id": "ACC-102",
+        "name": "Meera Iyer",
+        "phone": "+91 90000 00102",
+        "status": "Active",
+        "last_activity_at": "2025-03-10T12:00:00Z",
+        "protected": false,
+        "version": 3
+      },
+      "customers/ACC-105": {
+        "account_id": "ACC-105",
+        "name": "Kabir Mehta",
+        "phone": "+91 90000 00105",
+        "status": "Archived",
+        "last_activity_at": "2025-08-28T12:00:00Z",
+        "protected": false,
+        "version": 2
+      }
+    }
+  },
+  "error": null
+}
+```
+
+#### Evidence for an unknown run
+
+```http
+GET /api/runs/nope/evidence
+```
+
+Response `404`:
 
 ```json
 {
   "data": null,
   "error": {
-    "code": "not_implemented",
-    "message": "GET /api/runs/{run_id}/evidence is reserved and not implemented yet",
-    "details": null
+    "code": "run_not_found",
+    "message": "No run or ledger rows with this run_id",
+    "details": {
+      "run_id": "nope"
+    }
   }
 }
 ```
+
+### `POST /api/lab/run` (operator)
+
+Runs the scenario lab (`backend/scenarios.py`) in a separate process on a throwaway database (the app's database is untouched) and returns the report it saves to `backend/data/lab_report.json`: `{ran_at, filter, isolation, totals: {total, passed, failed, injected_faults}, scenarios: [{name, label, adapter, description, expected, actual, ok, mismatches}]}`. Optional query `filter` (`[a-z0-9_]`, substring of scenario names). Takes several seconds. `totals.failed` must be 0. Same as `python -m backend.scenarios`.
+
+### Post-action eligibility check
+
+Every executed archive (`update_customer_status` to `Archived`) gets `post_action_check`: after commit, on a new connection, the archive rule (inactivity threshold, not protected) is re-checked against the customer's current row, ignoring injected faults. Verdict `eligible` or `flagged_unsafe`; a flagged action also has `flag: "flagged_unsafe"`. Show it as "REWIND detected an unsafe change" and offer Undo. Other actions have `post_action_check: null`.
 
 ### Any unknown route
 
@@ -2576,7 +3170,10 @@ Response `404`:
 }
 ```
 
-## Changes since the last version (metrics)
+## Changes since the last version (agent runs)
 
-- `POST /api/agent/runs` is implemented (was 501): live and replay runs, see above.
-- Ledger rows created by agent runs carry `mode` (`live` / `replay`) and `actor: "agent"`.
+- New: `GET /api/runs/{run_id}/evidence` (was 501) and `POST /api/lab/run`.
+- Update responses and ActionRecord gain `post_action_check`; ActionRecord gains `flag` and `snapshot_sha256` (digest of the stored before/after, checked before every restore).
+- Undo verification gains the `ledger_snapshot_intact` check.
+- `/api/metrics`: `flagged` now also counts `flagged_unsafe` actions; the lab section reads `backend/data/lab_report.json`.
+- Local DBs from before this change need one `POST /api/demo/reset`.

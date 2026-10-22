@@ -4,8 +4,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 import db
-import lab
 import main
+import scenarios
 
 OPERATOR = {"X-Role": "operator", "X-Role-Key": "demo-operator-key"}
 STATUS = "/api/tools/update-customer-status"
@@ -133,32 +133,33 @@ def test_verified_verdict_without_supporting_evidence_counts_as_false_verified(c
 
 
 def test_last_lab_run_is_reported(client, tmp_path, monkeypatch):
-    path = tmp_path / "lab_last_run.json"
+    path = tmp_path / "lab_report.json"
     monkeypatch.setenv("REWIND_LAB_RESULTS_PATH", str(path))
-    lab.save_results(lab.run_all(), path)
+    results = scenarios.run_all()
+    scenarios.save_report(scenarios.build_report(results), path)
 
     m = metrics(client)
     assert m["lab"]["available"] is True
-    assert (m["lab"]["total"], m["lab"]["passed"], m["lab"]["failed"]) == (12, 12, 0)
+    assert (m["lab"]["total"], m["lab"]["passed"], m["lab"]["failed"]) == (len(results), len(results), 0)
     assert m["false_verified"] == {"count": 0, "ledger": 0, "lab": 0}
 
 
 def test_lab_false_verified_is_counted(client, tmp_path, monkeypatch):
-    path = tmp_path / "lab_last_run.json"
+    path = tmp_path / "lab_report.json"
     monkeypatch.setenv("REWIND_LAB_RESULTS_PATH", str(path))
-    lab.save_results([
-        {"name": "tamper", "adapter": "customer_status", "kind": "injected_fault",
-         "expected": "failed", "actual": "verified", "ok": False},
-        {"name": "undo", "adapter": "credit_limit", "kind": "normal",
-         "expected": "recovered/verified", "actual": "recovered/verified", "ok": True},
-    ], path)
+    scenarios.save_report(scenarios.build_report([
+        {"name": "tamper", "adapter": "customer_status", "label": "injected_fault",
+         "expected": {"verdict": "failed"}, "actual": {"verdict": "verified"}, "ok": False},
+        {"name": "undo", "adapter": "credit_limit", "label": "normal",
+         "expected": {"verdict": "verified"}, "actual": {"verdict": "verified"}, "ok": True},
+    ]), path)
     m = metrics(client)
     assert m["false_verified"] == {"count": 1, "ledger": 0, "lab": 1}
     assert (m["lab"]["passed"], m["lab"]["failed"]) == (1, 1)
 
 
 def test_unreadable_lab_file_is_reported_not_guessed(client, tmp_path, monkeypatch):
-    path = tmp_path / "lab_last_run.json"
+    path = tmp_path / "lab_report.json"
     path.write_text("{not json", encoding="utf-8")
     monkeypatch.setenv("REWIND_LAB_RESULTS_PATH", str(path))
     m = metrics(client)

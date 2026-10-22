@@ -117,6 +117,9 @@ class ActionRecord(BaseModel):
     evidence: dict[str, Any] | None
     recovery_verification: dict[str, Any] | None
     approval: dict[str, Any] | None
+    post_action_check: dict[str, Any] | None
+    flag: str | None                 # "flagged_unsafe" when the post-action check failed
+    snapshot_sha256: str | None
     recovered_at: str | None
     # Derived at read time from the same rules recovery.undo() uses.
     undo_available: bool

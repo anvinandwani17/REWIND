@@ -5,14 +5,13 @@ cannot be measured is null, and every definition is listed in ASSUMPTIONS.
 """
 import json
 import os
-import re
 import statistics
 from datetime import datetime
 from pathlib import Path
 
 import ledger
 
-DEFAULT_LAB_RESULTS_PATH = Path(__file__).parent / "data" / "lab_last_run.json"
+DEFAULT_LAB_RESULTS_PATH = Path(__file__).parent / "data" / "lab_report.json"
 REQUIRED_RESTORE_CHECKS = {
     "restored_value", "version_transition", "ledger_consistency", "db_integrity",
     "unrelated_rows_unchanged",
@@ -23,21 +22,23 @@ ASSUMPTIONS = [
     "actions.by_status has the full breakdown.",
     "actions.executed = status 'executed' (includes approved-then-executed); "
     "actions.blocked = status 'blocked' (policy blocks).",
-    "actions.flagged = forward actions for which at least one Undo was requested. The ledger has "
-    "no separate 'flag' event, so requesting Undo is treated as flagging the action as wrong. "
-    "Flagged overlaps executed.",
+    "actions.flagged = forward actions the post-action eligibility check marked flagged_unsafe, "
+    "or for which an Undo was requested (either counts as flagging the action as wrong). Flagged "
+    "overlaps executed.",
     "recoveries.* counts every Undo attempt row by its stored post-commit verdict; 'unverified' "
     "means no verdict was stored.",
-    "time_to_verified_recovery: from the first Undo attempt on an action (its ledger created_at) "
-    "to verification.checked_at of the attempt whose stored verdict is 'verified'. Recoveries "
+    "time_to_verified_recovery: from the moment an action was flagged - the earlier of its "
+    "flagged_unsafe post_action_check.checked_at and its first Undo attempt's created_at - to "
+    "verification.checked_at of the attempt whose stored verdict is 'verified'. Recoveries "
     "without a stored checked_at (older rows) are counted in excluded_no_timestamp, not estimated.",
     "false_verified.ledger = Undo rows whose stored verdict is 'verified' but whose own evidence "
     "does not support it (a required check missing, any check not passed, expected != actual, or "
     "stage not post_commit). It checks the stored evidence; it does not re-read current data.",
-    "false_verified.lab = scenarios in the last saved lab run whose actual outcome says 'verified' "
-    "when the expected outcome does not. null when no lab run is saved.",
+    "false_verified.lab = scenarios in the last saved lab report whose actual 'verdict' is "
+    "'verified' when the expected 'verdict' is not. null when no lab report is saved.",
     "false_verified.count = ledger + lab (lab counted only when a lab run is saved). It must be 0.",
-    "lab.* comes from the file the lab CLI writes (python backend/lab.py), not from this database.",
+    "lab.* comes from the report the scenario lab writes (python -m backend.scenarios or "
+    "POST /api/lab/run), not from this database.",
 ]
 
 
@@ -63,24 +64,20 @@ def _seconds(start, end):
     return (datetime.fromisoformat(end) - datetime.fromisoformat(start)).total_seconds()
 
 
-def _tokens(outcome):
-    return set(re.split(r"[/>\-\s]+", str(outcome)))
-
-
 def _lab():
     path = lab_results_path()
     if not path.exists():
-        return {"available": False, "path": str(path)}, None
+        return {"available": False, "path": path.as_posix()}, None
     try:
         run = json.loads(path.read_text(encoding="utf-8"))
         scenarios = run["scenarios"]
         false_verified = sum(
-            "verified" in _tokens(s["actual"]) and "verified" not in _tokens(s["expected"])
+            s["actual"].get("verdict") == "verified" and s["expected"].get("verdict") != "verified"
             for s in scenarios
         )
         summary = {
             "available": True,
-            "path": str(path),
+            "path": path.as_posix(),
             "ran_at": run.get("ran_at"),
             "filter": run.get("filter"),
             "total": len(scenarios),
@@ -89,7 +86,7 @@ def _lab():
         }
         return summary, false_verified
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        return {"available": False, "path": str(path), "error": f"{type(exc).__name__}: {exc}"}, None
+        return {"available": False, "path": path.as_posix(), "error": f"{type(exc).__name__}: {exc}"}, None
 
 
 def compute(conn):
@@ -114,6 +111,14 @@ def compute(conn):
         "unverified": verdicts.count(None),
     }
 
+    flagged_at = {}
+    for action in forward:
+        moments = [a["created_at"] for a in attempts_by_action.get(action["id"], [])]
+        if action["flag"] == "flagged_unsafe":
+            moments.append(action["post_action_check"]["checked_at"])
+        if moments:
+            flagged_at[action["id"]] = min(moments, key=datetime.fromisoformat)
+
     samples, excluded = [], 0
     for tries in attempts_by_action.values():
         verified = [a for a in tries if _verdict(a) == "verified"]
@@ -123,7 +128,7 @@ def compute(conn):
         if not checked_at:
             excluded += 1
             continue
-        samples.append(_seconds(min(a["created_at"] for a in tries), checked_at))
+        samples.append(_seconds(flagged_at[tries[0]["undo_of_action_id"]], checked_at))
 
     ledger_false_verified = sum(
         _verdict(a) == "verified" and not _supports_verified(a["verification"]) for a in attempts
@@ -136,7 +141,7 @@ def compute(conn):
             "total": len(forward),
             "executed": by_status.get("executed", 0),
             "blocked": by_status.get("blocked", 0),
-            "flagged": sum(1 for a in forward if a["id"] in attempts_by_action),
+            "flagged": len(flagged_at),
             "by_status": dict(sorted(by_status.items())),
         },
         "recoveries": recoveries,

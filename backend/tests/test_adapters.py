@@ -108,8 +108,8 @@ def test_undo_restores_and_post_commit_verifies(client, case):
     verdict = response.json()["data"]["verification"]
     assert verdict["verdict"] == "verified"
     assert {c["id"] for c in verdict["checks"]} == {
-        "restored_value", "version_transition", "ledger_consistency", "db_integrity",
-        "unrelated_rows_unchanged"}
+        "restored_value", "version_transition", "ledger_consistency", "ledger_snapshot_intact",
+        "db_integrity", "unrelated_rows_unchanged"}
     assert case["table"] in verdict["scope"]
     target = row(case["table"], case["target"])
     assert (target[case["field"]], target["version"]) == (case["old"], 3)

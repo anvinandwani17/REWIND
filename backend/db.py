@@ -56,7 +56,21 @@ CREATE TABLE IF NOT EXISTS actions (
     evidence_json TEXT,                          -- undo rows: pre-restore snapshot, guard, conflict evidence
     recovery_verification_json TEXT,             -- originals: latest undo attempt's verifier result
     approval_json TEXT,                          -- require_approval rows: decision, role, at, note
+    post_action_check_json TEXT,                 -- executed archives: eligibility re-check after commit
+    snapshot_sha256 TEXT,                        -- digest of before_json + after_json, set on write
     recovered_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS agent_runs (
+    run_id TEXT PRIMARY KEY,
+    mode TEXT NOT NULL CHECK (mode IN ('live', 'replay')),
+    instruction TEXT NOT NULL,                   -- customer names/phones masked
+    scenario TEXT,
+    status TEXT NOT NULL,
+    provider TEXT,
+    steps_json TEXT NOT NULL,
+    final_summary TEXT,
+    finished_at TEXT NOT NULL
 );
 
 -- At most one successful undo per action, enforced by SQLite itself.

@@ -341,7 +341,7 @@ def test_bad_replay_names(client, scenario, status, code):
 
 def test_every_shipped_replay_script_is_valid():
     names = sorted(p.stem for p in agent.REPLAYS_DIR.glob("*.json"))
-    assert names == ["archive_inactive", "blocked_protected"]
+    assert names == ["archive_inactive", "blocked_protected", "stale_report"]
     for name in names:
         script = agent.load_replay(name)
         assert script.version >= 1 and "not captured from a model run" in script.source

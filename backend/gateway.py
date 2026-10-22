@@ -168,6 +168,9 @@ def execute(tool_name, arguments, run_id=None, actor="api", approves=None, appro
                 recovery_state=recovery_state, verification=result,
             )
 
+    # Committed. For archives, re-check eligibility independently: this is what flags an
+    # archive that should never have been allowed (e.g. under an injected fault).
+    archived = executed and adapter.tool == "update_customer_status" and new_value == "Archived"
     data = {
         **outcome,
         "status": status,
@@ -175,6 +178,7 @@ def execute(tool_name, arguments, run_id=None, actor="api", approves=None, appro
         "recovery_state": recovery_state,
         "after": after,
         "verification": result,
+        "post_action_check": verification.post_action_check(action_id) if archived else None,
     }
     if executed:
         return 200, envelope(data)

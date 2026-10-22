@@ -136,7 +136,6 @@ def run_examples(client, monkeypatch):
 
     call("actions", "List actions", "GET", "/api/actions")
     call("metrics", "Metrics (no saved lab run)", "GET", "/api/metrics")
-    call("run_evidence_reserved", "Reserved: run evidence", "GET", "/api/runs/run-1/evidence")
     call("route_not_found", "Unknown route", "GET", "/api/nope")
 
     monkeypatch.delenv("REWIND_DEMO_MODE")
@@ -146,12 +145,20 @@ def run_examples(client, monkeypatch):
     # Agent runs start from a fresh fixture so the replay scripts' expected_version holds.
     client.post("/api/demo/reset", headers=ROLE_HEADERS["operator"])
     instruction = "Archive every customer who has been inactive for more than a year."
-    call("agent_run_replay", "Replay run: archive inactive customers", "POST", "/api/agent/runs",
-         {"instruction": instruction, "mode": "replay", "scenario": "archive_inactive"})
+    replay_run = call("agent_run_replay", "Replay run: archive inactive customers", "POST",
+                      "/api/agent/runs",
+                      {"instruction": instruction, "mode": "replay", "scenario": "archive_inactive"})
     call("agent_run_replay_blocked", "Replay run stopped by a policy block", "POST", "/api/agent/runs",
          {"instruction": instruction, "mode": "replay", "scenario": "blocked_protected"})
     call("agent_run_live_unconfigured", "Live run with no provider configured", "POST",
          "/api/agent/runs", {"instruction": instruction, "mode": "live"})
+
+    # Evidence after one of the run's actions has been undone.
+    replay_id = replay_run["data"]["run_id"]
+    client.post(f"/api/actions/{replay_run['data']['action_ids'][0]}/undo", headers=ROLE_HEADERS["operator"])
+    call("run_evidence", "Evidence for the replay run (after undoing its first action)", "GET",
+         f"/api/runs/{replay_id}/evidence")
+    call("run_evidence_not_found", "Evidence for an unknown run", "GET", "/api/runs/nope/evidence")
     return examples
 
 
@@ -264,10 +271,10 @@ def render(examples):
         "| Role | May call |",
         "|---|---|",
         "| (none) | `GET /api/customers`, `GET /api/credit-lines`, `GET /api/actions`, "
-        "`GET /api/actions/{action_id}`, `GET /api/metrics` |",
+        "`GET /api/actions/{action_id}`, `GET /api/metrics`, `GET /api/runs/{run_id}/evidence` |",
         "| `operator` | `POST /api/tools/update-customer-status`, `POST /api/tools/update-credit-limit`, "
         "`POST /api/actions/{action_id}/undo`, "
-        "`POST /api/demo/reset`, `POST /api/agent/runs` |",
+        "`POST /api/demo/reset`, `POST /api/agent/runs`, `POST /api/lab/run` |",
         "| `approver` | `POST /api/actions/{action_id}/approve`, `POST /api/actions/{action_id}/reject` |",
         "| `auditor` | `GET /api/audit/export` |",
         "",
@@ -414,8 +421,9 @@ def render(examples):
         _example(by_id["undo_not_found"]),
         "### `GET /api/metrics`",
         "",
-        "Measured from the ledger and the last saved lab run (`python backend/lab.py` writes "
-        "`backend/data/lab_last_run.json`). Values that cannot be measured are `null`. "
+        "Measured from the ledger and the last saved lab report (`python -m backend.scenarios` or "
+        "`POST /api/lab/run` writes `backend/data/lab_report.json`). Values that cannot be measured "
+        "are `null`. "
         "`assumptions` lists every definition used; read it before quoting a number. "
         "`false_verified.count` must be 0.",
         "",
@@ -445,16 +453,46 @@ def render(examples):
         _example(by_id["agent_run_replay"], "Setup: `POST /api/demo/reset` just before."),
         _example(by_id["agent_run_replay_blocked"]),
         _example(by_id["agent_run_live_unconfigured"]),
-        "### Reserved (not implemented yet)",
+        "### `GET /api/runs/{run_id}/evidence`",
         "",
-        _example(by_id["run_evidence_reserved"]),
+        "Everything recorded about one run, read back from SQLite: the instruction and steps (names "
+        "and phones masked), and for each ledger row its tool args, policy decision, before/after, "
+        "pre-commit guard, post-action check and `flag`, every recovery attempt with its verification "
+        "checks, and the current (`final_state`) row of everything the run touched. "
+        "`recorded_run: false` means the `run_id` only exists on ledger rows written outside an agent run.",
+        "",
+        _example(by_id["run_evidence"]),
+        _example(by_id["run_evidence_not_found"]),
+        "### `POST /api/lab/run` (operator)",
+        "",
+        "Runs the scenario lab (`backend/scenarios.py`) in a separate process on a throwaway database "
+        "(the app's database is untouched) and returns the report it saves to "
+        "`backend/data/lab_report.json`: `{ran_at, filter, isolation, totals: {total, passed, failed, "
+        "injected_faults}, scenarios: [{name, label, adapter, description, expected, actual, ok, "
+        "mismatches}]}`. Optional query `filter` (`[a-z0-9_]`, substring of scenario names). "
+        "Takes several seconds. `totals.failed` must be 0. Same as `python -m backend.scenarios`.",
+        "",
+        "### Post-action eligibility check",
+        "",
+        "Every executed archive (`update_customer_status` to `Archived`) gets `post_action_check`: "
+        "after commit, on a new connection, the archive rule (inactivity threshold, not protected) "
+        "is re-checked against the customer's current row, ignoring injected faults. Verdict "
+        "`eligible` or `flagged_unsafe`; a flagged action also has `flag: \"flagged_unsafe\"`. "
+        "Show it as \"REWIND detected an unsafe change\" and offer Undo. Other actions have "
+        "`post_action_check: null`.",
+        "",
         "### Any unknown route",
         "",
         _example(by_id["route_not_found"]),
-        "## Changes since the last version (metrics)",
+        "## Changes since the last version (agent runs)",
         "",
-        "- `POST /api/agent/runs` is implemented (was 501): live and replay runs, see above.",
-        "- Ledger rows created by agent runs carry `mode` (`live` / `replay`) and `actor: \"agent\"`.",
+        "- New: `GET /api/runs/{run_id}/evidence` (was 501) and `POST /api/lab/run`.",
+        "- Update responses and ActionRecord gain `post_action_check`; ActionRecord gains `flag` and "
+        "`snapshot_sha256` (digest of the stored before/after, checked before every restore).",
+        "- Undo verification gains the `ledger_snapshot_intact` check.",
+        "- `/api/metrics`: `flagged` now also counts `flagged_unsafe` actions; the lab section reads "
+        "`backend/data/lab_report.json`.",
+        "- Local DBs from before this change need one `POST /api/demo/reset`.",
         "",
     ]
     return "\n".join(sections)

@@ -361,7 +361,7 @@ def test_undo_restores_and_bumps_version(client):
     assert body["verification"]["stage"] == "post_commit"
     assert {c["id"] for c in body["verification"]["checks"]} == {
         "restored_value", "version_transition", "ledger_consistency",
-        "db_integrity", "unrelated_rows_unchanged",
+        "ledger_snapshot_intact", "db_integrity", "unrelated_rows_unchanged",
     }
     assert all(c["passed"] for c in body["verification"]["checks"])
     assert (body["before"]["status"], body["before"]["version"]) == ("Archived", 2)

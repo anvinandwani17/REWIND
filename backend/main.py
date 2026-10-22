@@ -1,8 +1,12 @@
+import json
 import os
+import subprocess
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
-from fastapi import Body, Depends, FastAPI
+from fastapi import Body, Depends, FastAPI, Query
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -189,11 +193,7 @@ def audit_export(role: str = auditor):
     })
 
 
-# --- reserved for the next steps ---------------------------------------------------------
-
-def not_implemented(route):
-    return respond((501, error_body("not_implemented", f"{route} is reserved and not implemented yet")))
-
+# --- agent runs, evidence, scenario lab -----------------------------------------------------
 
 @app.post("/api/agent/runs")
 def start_agent_run(request: AgentRunRequest, role: str = operator):
@@ -202,4 +202,26 @@ def start_agent_run(request: AgentRunRequest, role: str = operator):
 
 @app.get("/api/runs/{run_id}/evidence")
 def run_evidence(run_id: str):
-    return not_implemented("GET /api/runs/{run_id}/evidence")
+    return respond(agent.run_evidence(run_id))
+
+
+SCENARIOS_SCRIPT = Path(__file__).with_name("scenarios.py")
+
+
+@app.post("/api/lab/run")
+def lab_run(filter: str | None = Query(None, pattern=r"^[a-z0-9_]{1,64}$"), role: str = operator):
+    # A separate process: the lab swaps REWIND_DB_PATH to a throwaway database, which must
+    # never redirect this server's own requests while it runs.
+    command = [sys.executable, str(SCENARIOS_SCRIPT), "--json", *([filter] if filter else [])]
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=300,
+                                   cwd=SCENARIOS_SCRIPT.parent)
+    except subprocess.TimeoutExpired:
+        return respond((500, error_body("lab_failed", "The scenario lab timed out after 300 s")))
+    try:
+        report = json.loads(completed.stdout)
+    except ValueError:
+        return respond((500, error_body("lab_failed", "The scenario lab did not produce a report",
+                                        {"exit_code": completed.returncode,
+                                         "stderr_tail": completed.stderr[-2000:]})))
+    return envelope(report)

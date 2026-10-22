@@ -13,8 +13,10 @@ A check is only listed when the code compared real evidence. A verdict is
 "verified" only when every listed check passed and no required evidence was
 missing.
 """
+import demo
 import ledger
-from db import connect, transaction
+import policies
+from db import connect, get_customer, transaction
 from ledger import get_action, store_undo_verification
 
 
@@ -57,7 +59,16 @@ def _valid_snapshot(adapter, snapshot, target_id):
 
 # --- pre-commit guards ----------------------------------------------------------
 
-def _guard(adapter, db, target_id, rowcount, expected_value, expected_version, others_before, what):
+def _snapshot_intact(action):
+    return _check(
+        "ledger_snapshot_intact",
+        "The action's stored before/after snapshots still match the digest recorded when it was written",
+        action["snapshot_sha256"], ledger.snapshot_digest(action["before"], action["after"]),
+    )
+
+
+def _guard(adapter, db, target_id, rowcount, expected_value, expected_version, others_before, what,
+           extra_checks=()):
     current = adapter.snapshot(db, target_id)
     field, scope = adapter.field, _scope(adapter)
     checks = [
@@ -73,6 +84,7 @@ def _guard(adapter, db, target_id, rowcount, expected_value, expected_version, o
                "inside the same transaction",
                _fingerprint(others_before),
                _fingerprint(adapter.snapshot_unrelated(db, target_id))),
+        *extra_checks,
     ]
     scope_sentence = (
         f"Pre-commit guard for the {what} of {adapter.noun} {target_id}, inside the write "
@@ -89,8 +101,10 @@ def guard_update(adapter, db, before, new_value, others_before, rowcount):
 
 
 def guard_restore(adapter, db, action, others_before, rowcount):
+    # A restore writes the stored before-state, so that state must be untampered.
     return _guard(adapter, db, action["account_id"], rowcount, action["before"][adapter.field],
-                  action["after_version"] + 1, others_before, "undo restore")
+                  action["after_version"] + 1, others_before, "undo restore",
+                  extra_checks=[_snapshot_intact(action)])
 
 
 # --- post-commit verifier -----------------------------------------------------------
@@ -134,6 +148,7 @@ def _verify_restore(adapter, db, attempt, original, current):
                after_version + 1, current["version"] if current else None),
         _ledger(attempt, original, "executed", "recovered",
                 {"before_version": after_version, "after_version": after_version + 1}),
+        _snapshot_intact(original),
         _integrity(db),
     ]
     stored = (attempt["evidence"] or {}).get(f"other_{adapter.table}")
@@ -202,6 +217,37 @@ def _verify_failed_restore(adapter, db, attempt, original, current):
     # The restore did not happen, so this can never be "verified".
     verdict = "failed" if _all_passed(checks) else "manual_review_required"
     return _result(verdict, "post_commit", scope_sentence, checks)
+
+
+def post_action_check(action_id):
+    """After an executed archive commits, re-check the archive rule against current data
+    on a new connection. Injected faults do not apply here: this is the independent check
+    that catches an archive the gateway should not have allowed."""
+    with connect() as db:
+        action = get_action(db, action_id)
+        customer = get_customer(db, action["account_id"])
+    threshold = policies.settings()["recent_activity_days"]
+    days = policies.days_since(customer["last_activity_at"], demo.clock())
+    checks = [
+        _check("inactive_beyond_threshold",
+               f"Last activity {days} days ago; the archive rule requires {threshold}+ "
+               "(recent_activity), re-checked on current data with injected faults ignored",
+               {"meets_threshold": True}, {"meets_threshold": days >= threshold}),
+        _check("not_protected", "Customer is not protected",
+               {"protected": False}, {"protected": customer["protected"]}),
+    ]
+    result = {
+        "verdict": "eligible" if _all_passed(checks) else "flagged_unsafe",
+        "stage": "post_action",
+        "scope": (f"After commit, on a new SQLite connection: re-checked whether customer "
+                  f"{action['account_id']} was eligible to archive (inactivity threshold and "
+                  "protection) against its current row."),
+        "checks": checks,
+        "checked_at": ledger.now(),
+    }
+    with transaction() as db:
+        ledger.store_post_action_check(db, action_id, result)
+    return result
 
 
 def verify_attempt(adapter, db, attempt, original, current):

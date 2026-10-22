@@ -1,9 +1,17 @@
+import hashlib
 import json
 from datetime import datetime, timezone
 
 
 def now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def snapshot_digest(before, after):
+    """SHA-256 of an action's stored before/after, recorded when the row is written so
+    later tampering with the snapshots is detectable."""
+    canonical = json.dumps({"before": before, "after": after}, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def _dumps(value):
@@ -30,6 +38,11 @@ def action_dict(row):
         "evidence": _loads(row["evidence_json"]),
         "recovery_verification": _loads(row["recovery_verification_json"]),
         "approval": _loads(row["approval_json"]),
+        "post_action_check": _loads(row["post_action_check_json"]),
+        "flag": ("flagged_unsafe"
+                 if (_loads(row["post_action_check_json"]) or {}).get("verdict") == "flagged_unsafe"
+                 else None),
+        "snapshot_sha256": row["snapshot_sha256"],
         "created_at": row["created_at"],
         "recovered_at": row["recovered_at"],
         "actor": row["actor"],
@@ -57,9 +70,10 @@ def record_action(
             action_id, created_at, actor, tool, args_json, decision, rule_id,
             reason, risk, status, account_id, before_json, after_json,
             before_version, after_version, run_id, mode, scenario,
-            undo_of_action_id, recovery_state, verification_json, evidence_json
+            undo_of_action_id, recovery_state, verification_json, evidence_json,
+            snapshot_sha256
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             action_id, now(), actor, tool, json.dumps(args), decision, rule_id,
@@ -70,21 +84,26 @@ def record_action(
             after["version"] if after else None,
             run_id, mode, scenario, undo_of_action_id,
             recovery_state, _dumps(verification), _dumps(evidence),
+            snapshot_digest(before, after),
         ),
     )
 
 
 def resolve_pending(db, action_id, *, status, after, recovery_state, verification, reason, approval):
     """Approve: the pending row itself becomes the executed (or failed) action."""
+    before = _loads(db.execute("SELECT before_json FROM actions WHERE action_id = ?",
+                               (action_id,)).fetchone()[0])
     cursor = db.execute(
         """
         UPDATE actions
         SET status = ?, after_json = ?, after_version = ?, recovery_state = ?,
-            verification_json = ?, reason = ?, approval_json = ?
+            verification_json = ?, reason = ?, approval_json = ?,
+            snapshot_sha256 = ?
         WHERE action_id = ? AND status = 'pending_approval'
         """,
         (status, _dumps(after), after["version"] if after else None, recovery_state,
-         _dumps(verification), reason, _dumps(approval), action_id),
+         _dumps(verification), reason, _dumps(approval), snapshot_digest(before, after),
+         action_id),
     )
     if cursor.rowcount != 1:
         raise RuntimeError(f"Action {action_id} was not pending approval")
@@ -109,6 +128,44 @@ def store_undo_verification(db, undo_action_id, original_action_id, result):
         "UPDATE actions SET recovery_verification_json = ? WHERE action_id = ?",
         (_dumps(result), original_action_id),
     )
+
+
+def store_post_action_check(db, action_id, result):
+    db.execute("UPDATE actions SET post_action_check_json = ? WHERE action_id = ?",
+               (_dumps(result), action_id))
+
+
+def list_undo_attempts(db, action_id):
+    rows = db.execute(
+        "SELECT * FROM actions WHERE undo_of_action_id = ? ORDER BY created_at, action_id",
+        (action_id,),
+    ).fetchall()
+    return [action_dict(row) for row in rows]
+
+
+def save_run(run, steps, instruction):
+    """Store a finished agent run (run metadata only; customer changes are in actions)."""
+    import db as database  # local: this module's helpers otherwise take the caller's connection
+
+    with database.transaction() as conn:
+        record_run(conn, run, steps, instruction)
+
+
+def record_run(db, run, steps, instruction):
+    db.execute(
+        """INSERT INTO agent_runs (run_id, mode, instruction, scenario, status, provider,
+                                   steps_json, final_summary, finished_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (run["run_id"], run["mode"], instruction, run.get("scenario"), run["status"],
+         _dumps(run.get("provider")), json.dumps(steps), run["final_summary"], now()),
+    )
+
+
+def get_run(db, run_id):
+    row = db.execute("SELECT * FROM agent_runs WHERE run_id = ?", (run_id,)).fetchone()
+    if row is None:
+        return None
+    return {**dict(row), "provider": _loads(row["provider"]), "steps": json.loads(row["steps_json"])}
 
 
 def count_executed_in_run(db, run_id):

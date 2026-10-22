@@ -14,8 +14,10 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, ValidationError
 
+import adapters
 import db
 import ledger
+import privacy
 import tools
 from schemas import (
     GetCustomerArgs, InactivityReportArgs, ListCustomersArgs, UpdateCustomerStatusArgs,
@@ -99,6 +101,9 @@ class Provider:
     """
     name = "provider"
     model = None
+    # False for providers that play fixed turns instead of calling a model; their runs
+    # are labelled mode "replay", never presented as a live model run.
+    live = True
 
     def next_turn(self, system, transcript, tool_definitions):
         raise NotImplementedError
@@ -274,6 +279,12 @@ def _final_summary(run_id, status):
 def _finish(run, status, error=None):
     run["status"] = status
     run["final_summary"], run["action_ids"] = _final_summary(run["run_id"], status)
+    # Stored for GET /api/runs/{run_id}/evidence, with customer names/phones masked.
+    with db.connect() as conn:
+        names = [c["name"] for c in db.list_customers(conn)]
+    steps = [{**s, "args": privacy.mask_args(s["args"], names) if isinstance(s["args"], dict)
+              else s["args"]} for s in run["steps"]]
+    ledger.save_run(run, steps, privacy.mask_text(run["instruction"], names))
     if status == "provider_failed":
         return 502, envelope(run, error)
     return 200, envelope(run)
@@ -283,7 +294,8 @@ def _finish(run, status, error=None):
 
 def run_live(instruction, provider):
     run_id = f"run-{uuid4()}"
-    run = {"run_id": run_id, "mode": "live", "status": "running", "instruction": instruction,
+    mode = "live" if provider.live else "replay"
+    run = {"run_id": run_id, "mode": mode, "status": "running", "instruction": instruction,
            "scenario": None, "provider": {"name": provider.name, "model": provider.model},
            "steps": [], "model_message": None, "final_summary": None, "action_ids": []}
     transcript = [{"role": "user", "content": instruction}]
@@ -310,7 +322,7 @@ def run_live(instruction, provider):
             if len(run["steps"]) >= MAX_STEPS:
                 return _finish(run, "step_limit_reached")
             step, feedback, invalid, stop = execute_tool(
-                len(run["steps"]) + 1, call.name, call.input, run_id, "live")
+                len(run["steps"]) + 1, call.name, call.input, run_id, mode)
             run["steps"].append(step)
             if stop:
                 return _finish(run, "stopped_blocked")
@@ -378,6 +390,62 @@ def run_replay(instruction, scenario):
         if stop:
             return _finish(run, "stopped_blocked")
     return _finish(run, "completed")
+
+
+# --- evidence for GET /api/runs/{run_id}/evidence -------------------------------------------
+
+def run_evidence(run_id):
+    """Everything recorded about one run, read back from SQLite. Returns (status, envelope)."""
+    with db.connect() as conn:
+        run = ledger.get_run(conn, run_id)
+        actions = ledger.list_actions_for_run(conn, run_id)
+        if run is None and not actions:
+            return 404, error_body("run_not_found", "No run or ledger rows with this run_id",
+                                   {"run_id": run_id})
+        items, final_state = [], {}
+        for action in actions:
+            attempts = ledger.list_undo_attempts(conn, action["id"])
+            items.append({
+                "action_id": action["id"],
+                "tool": action["tool_name"],
+                "args": action["arguments"],
+                "actor": action["actor"],
+                "mode": action["mode"],
+                "scenario": action["scenario"],
+                "status": action["status"],
+                "policy": {key: action[key] for key in ("decision", "rule_id", "reason", "risk")},
+                "approval": action["approval"],
+                "before": action["before"],
+                "after": action["after"],
+                "pre_commit_guard": action["verification"],
+                "post_action_check": action["post_action_check"],
+                "flag": action["flag"],
+                "recovery": {
+                    "state": action["recovery_state"],
+                    "recovered_at": action["recovered_at"],
+                    "attempts": [{
+                        "undo_action_id": a["id"], "created_at": a["created_at"], "actor": a["actor"],
+                        "status": a["status"], "reason": a["reason"], "verification": a["verification"],
+                    } for a in attempts],
+                },
+            })
+            adapter = adapters.for_tool(action["tool_name"])
+            if adapter and action["account_id"]:
+                final_state[f"{adapter.table}/{action['account_id']}"] = adapter.snapshot(
+                    conn, action["account_id"])
+    return 200, envelope({
+        "run_id": run_id,
+        "recorded_run": run is not None,  # False for ledger rows written outside an agent run
+        "instruction": run["instruction"] if run else None,
+        "mode": run["mode"] if run else (actions[0]["mode"] if actions else None),
+        "status": run["status"] if run else None,
+        "scenario": run["scenario"] if run else None,
+        "provider": run["provider"] if run else None,
+        "steps": run["steps"] if run else [],
+        "final_summary": run["final_summary"] if run else None,
+        "actions": items,
+        "final_state": final_state,
+    })
 
 
 # --- entry point for POST /api/agent/runs --------------------------------------------------

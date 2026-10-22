@@ -75,6 +75,7 @@ def reset():
     older schema.
     """
     with db.transaction() as conn:
+        conn.execute("DROP TABLE IF EXISTS agent_runs")
         conn.execute("DROP TABLE IF EXISTS actions")
         conn.execute("DROP TABLE IF EXISTS credit_lines")
         conn.execute("DROP TABLE IF EXISTS customers")
