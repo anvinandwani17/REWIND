@@ -9,8 +9,9 @@ Scope: Undo is supported for **customer status changes only**. This is not a uni
 **Customer**
 ```json
 {"account_id": "ACC-102", "name": "Meera Iyer", "status": "Active",
- "last_activity_at": "2024-03-10", "protected": false, "version": 1}
+ "last_activity_at": "2025-03-10T12:00:00Z", "protected": false, "version": 1}
 ```
+`last_activity_at` is ISO-8601 UTC with a trailing `Z`.
 
 **Verification** (deterministic code re-reading SQLite; never the LLM)
 ```json
@@ -34,8 +35,15 @@ Request-body validation errors are still FastAPI's default 422 `{"detail": [...]
 ### `GET /api/actions` → ledger, newest first
 ```json
 [{"id", "run_id", "tool_name", "arguments", "before", "after", "risk",
-  "status", "recovery_state", "verification", "created_at", "recovered_at"}]
+  "status", "recovery_state", "verification", "created_at", "recovered_at",
+  "actor", "decision", "reason", "account_id", "before_version", "after_version",
+  "mode", "scenario", "undo_of_action_id"}]
 ```
+- `actor`: `api` for direct calls (`agent` / `system` later)
+- `decision`: `allow` | `block`
+- `mode`: `null` for direct API calls, later `live` | `replay` (replay is never a live model run)
+- `scenario`: `null`, or `injected_fault` for demo fault runs
+- `undo_of_action_id`: reserved for later; `null` today
 - `status`: `executed` | `blocked` | `failed`
 - `recovery_state`: `available` | `unavailable` | `conflict_detected` | `verified` | `verification_failed`
 - `risk`: `low` | `medium` | `high`
@@ -61,11 +69,26 @@ Request: `{"account_id": "ACC-102", "new_status": "Active" | "Archived", "run_id
 | 404 | Error |
 | 500 | `{action_id, ...Verification}` with `status: "failed"`; the restore was rolled back, customer unchanged |
 
-### `POST /api/demo/reset` → `{"status": "reset", "customers": Customer[]}`
-Clears the ledger and reseeds the three demo customers. The only route that wipes data.
+### `POST /api/demo/reset`
+Only works when the backend runs with `REWIND_DEMO_MODE=1`; otherwise 403 Error.
+Clears the ledger and reseeds the 8-customer fixture in one transaction. The only route that wipes data.
+```json
+{"status": "reset", "demo_now": "2026-10-22T12:00:00Z", "customers": Customer[],
+ "summary": {"total": 8, "active": 7, "archived": 1, "protected": 2,
+             "roles": {"ACC-101": "recently active", "...": "..."}},
+ "ledger_entries": 0}
+```
+Running it twice gives identical output.
 
 ## Changes since the first uncommitted version (2026-10-22)
 - 404s and other backend errors now return `{status: "error", reason}` instead of `{detail}`.
 - Update 200 response gains a `verification` field (additive).
 - New `status: "failed"` / `recovery_state: "verification_failed"` values; a failed verification never leaves data changed.
 - New route `POST /api/demo/reset`.
+
+## Changes in Priority-0 item 1 (2026-10-22)
+- `last_activity_at` changed from a date (`2024-03-10`) to ISO-8601 UTC (`2024-03-10T12:00:00Z`).
+- Demo data is now 8 customers (ACC-101..108) instead of 3.
+- `/api/actions` items gain `actor`, `decision`, `reason`, `account_id`, `before_version`, `after_version`, `mode`, `scenario`, `undo_of_action_id` (additive).
+- `POST /api/demo/reset` returns 403 unless `REWIND_DEMO_MODE=1`, and its body gains `demo_now`, `summary`, `ledger_entries`.
+- Default database moved to `backend/data/rewind.db`.

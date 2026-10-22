@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 import db
+import demo
 import gateway
 import ledger
 import recovery
@@ -13,7 +14,9 @@ from schemas import StatusUpdateRequest
 
 @asynccontextmanager
 async def lifespan(app):
-    db.init_schema()  # creates/seeds only; never wipes
+    # Creates tables and fills an empty database only; never wipes.
+    db.init_schema()
+    demo.seed_if_empty()
     yield
 
 
@@ -43,9 +46,13 @@ def update_customer_status(request: StatusUpdateRequest):
 
 @app.post("/api/demo/reset")
 def reset_demo():
-    """The only route that wipes data: clears the ledger and reseeds customers."""
-    db.reset_demo()
-    return {"status": "reset", "customers": tools.list_customers()}
+    """The only route that wipes data. Requires REWIND_DEMO_MODE=1."""
+    if not demo.demo_mode_enabled():
+        return JSONResponse(
+            status_code=403,
+            content={"status": "error", "reason": "Demo mode is off (set REWIND_DEMO_MODE=1)"},
+        )
+    return demo.reset()
 
 
 @app.post("/api/actions/{action_id}/undo")

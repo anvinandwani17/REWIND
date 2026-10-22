@@ -39,9 +39,11 @@ def execute(tool_name, arguments, run_id=None):
         decision = policies.evaluate(before, args.new_status)
         if not decision["allowed"]:
             record_action(
-                db, action_id, run_id, tool_name, logged_args, before, before,
-                decision["risk"], "blocked", "unavailable",
-                {"policy": "blocked", "reason": decision["reason"]},
+                db, action_id=action_id, run_id=run_id, tool=tool_name,
+                args=logged_args, before=before, after=before,
+                risk=decision["risk"], status="blocked",
+                recovery_state="unavailable", reason=decision["reason"],
+                verification={"policy": "blocked", "reason": decision["reason"]},
             )
             return decision["http_status"], {
                 "action_id": action_id,
@@ -73,8 +75,11 @@ def execute(tool_name, arguments, run_id=None):
             ("executed", "available") if verified else ("failed", "unavailable")
         )
         record_action(
-            db, action_id, run_id, tool_name, logged_args, before, after,
-            decision["risk"], status, recovery_state, result,
+            db, action_id=action_id, run_id=run_id, tool=tool_name,
+            args=logged_args, before=before, after=after,
+            risk=decision["risk"], status=status,
+            recovery_state=recovery_state, verification=result,
+            reason=None if verified else "Post-write verification failed; write rolled back",
         )
 
     return (200 if verified else 500), {

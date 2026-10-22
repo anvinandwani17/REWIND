@@ -4,14 +4,24 @@ import pytest
 from fastapi.testclient import TestClient
 
 import db
+import demo
 import main
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("REWIND_DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("REWIND_DEMO_MODE", "1")
     with TestClient(main.app) as c:
         yield c
+
+
+def snapshot():
+    with db.connect() as conn:
+        return (
+            [dict(r) for r in conn.execute("SELECT * FROM customers ORDER BY account_id")],
+            [dict(r) for r in conn.execute("SELECT * FROM actions ORDER BY action_id")],
+        )
 
 
 def archive(client, account_id):
@@ -152,9 +162,54 @@ def test_failed_restore_verification_rolls_back_restore(client, monkeypatch):
     assert action["recovered_at"] is None
 
 
-def test_reset_restores_seed_and_clears_ledger(client):
+def test_schema_init_is_idempotent_and_preserves_rows(client):
     archive(client, "ACC-102")
+    before = snapshot()
+    db.init_schema()
+    db.init_schema()
+    demo.seed_if_empty()
+    assert snapshot() == before
+    assert len(before[0]) == len(demo.CUSTOMERS)
+    assert len(before[1]) == 1
+
+    with db.connect() as conn:
+        assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+
+def test_customers_shape_and_fixture_roles(client):
+    customers = client.get("/api/customers").json()
+    assert set(customers[0]) == {
+        "account_id", "name", "status", "last_activity_at", "protected", "version",
+    }
+    by_id = {c["account_id"]: c for c in customers}
+    assert by_id["ACC-101"]["last_activity_at"] == "2026-10-15T12:00:00Z"
+    assert by_id["ACC-103"]["protected"] is True
+    assert by_id["ACC-107"]["status"] == "Archived"
+
+
+def test_reset_reproduces_identical_state_twice(client):
+    first = client.post("/api/demo/reset")
+    assert first.status_code == 200
+    state = snapshot()
+    assert state[1] == []
+
+    archive(client, "ACC-102")
+    archive(client, "ACC-105")
+    assert snapshot() != state
+
+    second = client.post("/api/demo/reset")
+    assert second.json() == first.json()
+    assert snapshot() == state
+    assert first.json()["summary"]["total"] == 8
+
+
+def test_reset_refused_when_demo_mode_off(client, monkeypatch):
+    archive(client, "ACC-102")
+    before = snapshot()
+    monkeypatch.delenv("REWIND_DEMO_MODE")
+
     response = client.post("/api/demo/reset")
-    assert response.status_code == 200
-    assert [c["status"] for c in response.json()["customers"]] == ["Active"] * 3
-    assert client.get("/api/actions").json() == []
+    assert response.status_code == 403
+    assert response.json()["status"] == "error"
+    assert snapshot() == before
