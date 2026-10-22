@@ -22,8 +22,8 @@ CREATE TABLE IF NOT EXISTS customers (
 CREATE TABLE IF NOT EXISTS actions (
     action_id TEXT PRIMARY KEY,
     created_at TEXT NOT NULL,
-    actor TEXT NOT NULL,                         -- api | agent | system
-    tool TEXT NOT NULL,
+    actor TEXT NOT NULL,                         -- api | agent | ops_user | system
+    tool TEXT NOT NULL,                          -- update_customer_status | undo
     args_json TEXT NOT NULL,
     decision TEXT NOT NULL
         CHECK (decision IN ('allow', 'block', 'require_approval', 'reject')),
@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS actions (
     reason TEXT,
     risk TEXT NOT NULL CHECK (risk IN ('low', 'medium', 'high')),
     status TEXT NOT NULL CHECK (
-        status IN ('executed', 'blocked', 'rejected', 'pending_approval', 'failed')
+        status IN ('executed', 'blocked', 'rejected', 'pending_approval', 'failed',
+                   'conflict_detected')
     ),
     account_id TEXT REFERENCES customers(account_id),  -- NULL when the account does not exist
     before_json TEXT,
@@ -46,6 +47,10 @@ CREATE TABLE IF NOT EXISTS actions (
     verification_json TEXT,
     recovered_at TEXT
 );
+
+-- At most one successful undo per action, enforced by SQLite itself.
+CREATE UNIQUE INDEX IF NOT EXISTS one_executed_undo_per_action
+    ON actions(undo_of_action_id) WHERE status = 'executed';
 """
 
 

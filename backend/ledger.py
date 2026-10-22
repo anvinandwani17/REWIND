@@ -80,6 +80,14 @@ def count_executed_in_run(db, run_id):
     ).fetchone()[0]
 
 
+def get_executed_undo(db, action_id):
+    row = db.execute(
+        "SELECT * FROM actions WHERE undo_of_action_id = ? AND status = 'executed'",
+        (action_id,),
+    ).fetchone()
+    return action_dict(row) if row else None
+
+
 def get_action(db, action_id):
     row = db.execute(
         "SELECT * FROM actions WHERE action_id = ?", (action_id,)
@@ -94,13 +102,14 @@ def list_actions(db):
     return [action_dict(row) for row in rows]
 
 
-def set_recovery_state(db, action_id, recovery_state, verification, recovered_at=None):
+def set_recovery_state(db, action_id, recovery_state, recovered_at=None):
+    # The original action's own verification is kept; undo evidence lives on
+    # the undo ledger row.
     db.execute(
         """
         UPDATE actions
-        SET recovery_state = ?, verification_json = ?,
-            recovered_at = COALESCE(?, recovered_at)
+        SET recovery_state = ?, recovered_at = COALESCE(?, recovered_at)
         WHERE action_id = ?
         """,
-        (recovery_state, _dumps(verification), recovered_at, action_id),
+        (recovery_state, recovered_at, action_id),
     )

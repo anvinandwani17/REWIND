@@ -333,34 +333,78 @@ def test_update_verification_failure_rolls_back_write_but_logs(client, monkeypat
     assert (action["status"], action["recovery_state"]) == ("failed", "unavailable")
 
 
-# --- undo (unchanged behaviour) -----------------------------------------------------------
+# --- undo -------------------------------------------------------------------------------
 
 def failed_check(*args):
     return {"status": "failed", "checks": {"forced": False}, "current_customer": None}
 
 
-def test_undo_restores_and_verifies(client):
+def undo(client, action_id):
+    return client.post(f"/api/actions/{action_id}/undo")
+
+
+def undo_rows(client, action_id):
+    return [a for a in actions(client) if a["undo_of_action_id"] == action_id]
+
+
+def test_undo_restores_and_bumps_version(client):
     action_id = archive(client, "ACC-102").json()["action_id"]
-    response = client.post(f"/api/actions/{action_id}/undo")
+    response = undo(client, action_id)
     body = response.json()
     assert response.status_code == 200
-    assert body["status"] == "verified"
-    assert all(body["checks"].values())
+    assert (body["status"], body["already_recovered"]) == ("recovered", False)
+    assert all(body["verification"]["checks"].values())
+    assert (body["before"]["status"], body["before"]["version"]) == ("Archived", 2)
+    assert (body["after"]["status"], body["after"]["version"]) == ("Active", 3)
     assert customer(client, "ACC-102")["status"] == "Active"
     assert customer(client, "ACC-102")["version"] == 3
 
-    again = client.post(f"/api/actions/{action_id}/undo")
-    assert again.status_code == 409
-    assert again.json()["status"] == "refused"
+    [row] = undo_rows(client, action_id)
+    assert row["id"] == body["undo_action_id"]
+    assert (row["tool_name"], row["status"], row["decision"]) == ("undo", "executed", "allow")
+    assert (row["before_version"], row["after_version"]) == (2, 3)
+    assert row["account_id"] == "ACC-102"
+
+    original = client.get(f"/api/actions/{action_id}").json()
+    assert original["recovery_state"] == "recovered"
+    assert original["recovered_at"] is not None
+    # The original's own forward verification is preserved.
+    assert "requested_status_applied" in original["verification"]["checks"]
 
 
-def test_undo_unknown_action_returns_error_object(client):
-    response = client.post("/api/actions/nope/undo")
-    assert response.status_code == 404
-    assert response.json()["error"]["code"] == "action_not_found"
+def test_undo_after_second_actor_edit_conflicts_and_keeps_newer_edit(client):
+    action_id = archive(client, "ACC-102").json()["action_id"]
+    status, ops = gateway.execute(
+        "update_customer_status",
+        {"account_id": "ACC-102", "new_status": "Active", "reason": "customer called back"},
+        actor="ops_user",
+    )
+    assert (status, ops["status"]) == (200, "executed")
+    newer = customer(client, "ACC-102")
+    assert newer["version"] == 3
+
+    response = undo(client, action_id)
+    body = response.json()
+    assert response.status_code == 409
+    assert body["status"] == "conflict_detected"
+    assert body["expected_version"] == 2
+    assert body["current_customer"] == newer
+    assert body["differences"] == {
+        "status": {"expected": "Archived", "current": "Active"},
+        "version": {"expected": 2, "current": 3},
+    }
+
+    assert customer(client, "ACC-102") == newer
+    [attempt] = undo_rows(client, action_id)
+    assert attempt["status"] == "conflict_detected"
+    assert attempt["before"] == attempt["after"] == newer
+    assert attempt["verification"]["differences"] == body["differences"]
+    ops_row = next(a for a in actions(client) if a["actor"] == "ops_user")
+    assert ops_row["status"] == "executed"
+    assert client.get(f"/api/actions/{action_id}").json()["recovery_state"] == "conflict_detected"
 
 
-def test_undo_refuses_to_overwrite_newer_edit(client):
+def test_undo_conflict_reports_changed_fields(client):
     action_id = archive(client, "ACC-102").json()["action_id"]
     with db.transaction() as conn:
         conn.execute(
@@ -368,23 +412,88 @@ def test_undo_refuses_to_overwrite_newer_edit(client):
             " WHERE account_id = 'ACC-102'"
         )
 
-    response = client.post(f"/api/actions/{action_id}/undo")
+    response = undo(client, action_id)
     assert response.status_code == 409
-    assert response.json()["status"] == "conflict_detected"
+    assert set(response.json()["differences"]) == {"name", "version"}
     current = customer(client, "ACC-102")
     assert (current["name"], current["status"], current["version"]) == ("Edited", "Archived", 3)
 
 
+def test_double_undo_is_harmless(client):
+    action_id = archive(client, "ACC-102").json()["action_id"]
+    first = undo(client, action_id).json()
+    state = snapshot()
+
+    second = undo(client, action_id)
+    assert second.status_code == 200
+    assert second.json() == {**first, "already_recovered": True}
+    assert snapshot() == state
+    assert customer(client, "ACC-102")["version"] == 3
+    assert len(undo_rows(client, action_id)) == 1
+
+
+def test_undo_of_blocked_action_is_refused(client):
+    action_id = archive(client, "ACC-103").json()["action_id"]  # protected -> blocked
+    before = snapshot()
+    response = undo(client, action_id)
+    assert response.status_code == 409
+    error = response.json()["error"]
+    assert error["code"] == "not_undoable"
+    assert error["details"]["status"] == "blocked"
+    assert snapshot() == before
+
+
+def test_undo_of_an_undo_is_refused(client):
+    action_id = archive(client, "ACC-102").json()["action_id"]
+    undo_id = undo(client, action_id).json()["undo_action_id"]
+    response = undo(client, undo_id)
+    assert response.status_code == 409
+    assert response.json()["error"]["details"]["tool"] == "undo"
+
+
+def test_undo_works_for_two_customers_in_one_session(client):
+    first = archive(client, "ACC-102").json()["action_id"]
+    second = archive(client, "ACC-105").json()["action_id"]
+    untouched = customer(client, "ACC-108")
+
+    assert undo(client, second).status_code == 200
+    assert undo(client, first).status_code == 200
+    for account_id in ("ACC-102", "ACC-105"):
+        assert (customer(client, account_id)["status"], customer(client, account_id)["version"]) == ("Active", 3)
+    assert customer(client, "ACC-108") == untouched
+
+
+def test_undo_unknown_action_returns_error_object(client):
+    response = undo(client, "nope")
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "action_not_found"
+
+
 def test_failed_restore_verification_rolls_back_restore(client, monkeypatch):
     import verification
+    real_verify_restore = verification.verify_restore
     action_id = archive(client, "ACC-102").json()["action_id"]
     monkeypatch.setattr(verification, "verify_restore", failed_check)
 
-    response = client.post(f"/api/actions/{action_id}/undo")
+    response = undo(client, action_id)
     assert response.status_code == 500
     assert response.json()["status"] == "failed"
     assert customer(client, "ACC-102")["status"] == "Archived"
     assert customer(client, "ACC-102")["version"] == 2
-    [action] = actions(client)
-    assert action["recovery_state"] == "verification_failed"
-    assert action["recovered_at"] is None
+    original = client.get(f"/api/actions/{action_id}").json()
+    assert original["recovery_state"] == "verification_failed"
+    assert original["recovered_at"] is None
+    [attempt] = undo_rows(client, action_id)
+    assert attempt["status"] == "failed"
+
+    # A retry is allowed once verification passes again.
+    monkeypatch.setattr(verification, "verify_restore", real_verify_restore)
+    assert undo(client, action_id).status_code == 200
+
+
+def test_backend_logic_has_no_hardcoded_account_ids():
+    from pathlib import Path
+    backend = Path(__file__).resolve().parents[1]
+    offenders = [p.name for p in backend.glob("*.py")
+                 if p.name != "demo.py" and "ACC-" in p.read_text(encoding="utf-8")]
+    assert offenders == []

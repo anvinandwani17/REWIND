@@ -50,13 +50,14 @@ Undo checks: `original_status_restored`, `version_incremented`, `unrelated_recor
 - `actor`: `api` (direct HTTP call) | `agent`
 - `decision`: `allow` | `block` | `require_approval` | `reject`
 - `rule_id`: `default_allow`, `protected_customer`, `unknown_status`, `no_change`, `recent_activity`, `bulk_change`, `account_not_found`
-- `status`: `executed` | `blocked` | `pending_approval` | `rejected` | `failed`
-- `recovery_state`: `available` | `unavailable` | `conflict_detected` | `verified` | `verification_failed`
+- `tool_name`: `update_customer_status` | `undo`
+- `status`: `executed` | `blocked` | `pending_approval` | `rejected` | `failed` | `conflict_detected` (undo attempts)
+- `recovery_state`: `available` | `unavailable` | `conflict_detected` | `recovered` | `verification_failed`
+- `undo_of_action_id`: on undo rows, the action being undone
 - `risk`: `low` | `medium` | `high`
 - `mode`: `null` for direct calls; later `live` | `replay` (replay is never a live model run)
 - `scenario`: `null` or `injected_fault`
 - `account_id` is `null` on `rejected` rows for accounts that don't exist (the requested id is in `arguments`)
-- `undo_of_action_id`: reserved, `null` today
 
 ## Routes
 
@@ -86,14 +87,19 @@ Request:
 | 500 | `{..., status: "failed", recovery_state: "unavailable", verification}`; write rolled back | `failed` |
 
 ### `POST /api/actions/{action_id}/undo`
+Only `executed` `update_customer_status` actions can be undone. Undo restores only when the
+current customer row equals the recorded after-state **and** its version equals `after_version`.
+Every attempt writes its own ledger row (`tool: "undo"`, `undo_of_action_id` = the original),
+in the same transaction as any customer change.
 
 | Code | Body |
 |---|---|
-| 200 | `{action_id, ...Verification}` with `status: "verified"`; customer restored |
-| 409 | `{action_id, status: "conflict_detected", reason, expected_after, current_customer}`; a newer edit exists, nothing changed. Permanent for that action. |
-| 409 | `{action_id, status: "refused", reason}`; Undo not available in the current `recovery_state` |
+| 200 | `{action_id, undo_action_id, status: "recovered", already_recovered: false, before, after, verification}`; customer restored, version +1, original's `recovery_state` → `recovered` |
+| 200 | Same body with `already_recovered: true` when the action was already recovered; nothing changes |
+| 409 | `{action_id, undo_action_id, status: "conflict_detected", reason, expected_after, expected_version, current_customer, differences: {field: {expected, current}}}`; customer untouched, attempt logged |
+| 409 | Error `not_undoable`, `details: {action_id, status, tool}` (blocked/rejected/pending actions, or an undo row) |
 | 404 | Error `action_not_found` |
-| 500 | `{action_id, ...Verification}` with `status: "failed"`; the restore was rolled back |
+| 500 | `{action_id, undo_action_id, status: "failed", reason, verification, current_customer}`; restore rolled back, retry allowed |
 
 ### `POST /api/demo/reset`
 Needs `REWIND_DEMO_MODE=1`, otherwise 403 Error `demo_mode_off`.
@@ -106,6 +112,15 @@ Drops, recreates and reseeds both tables in one transaction (also upgrades an ol
 ```
 
 ## Change log
+
+### Priority-0 item 3 (2026-10-22)
+- **Breaking:** successful Undo returns `status: "recovered"` (was `"verified"`); checks moved under `verification.checks`.
+- **Breaking:** repeat Undo returns 200 with `already_recovered: true` (was 409 `refused`).
+- **Breaking:** undoing a non-undoable action returns Error `not_undoable` (was `{status: "refused"}`).
+- Conflict 409 gains `undo_action_id`, `expected_version`, `differences`.
+- Every Undo attempt appears in `/api/actions` as its own row with `tool_name: "undo"`.
+- Original action `recovery_state` is `recovered` (was `verified`).
+- Local DBs from before this change need one `POST /api/demo/reset`.
 
 ### Priority-0 item 2 (2026-10-22)
 - **Breaking:** error bodies are now `{error: {code, message, details}}` (was `{status: "error", reason}`), including 422s (was FastAPI's `{detail}`).
