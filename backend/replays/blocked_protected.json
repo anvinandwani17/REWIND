@@ -1,0 +1,13 @@
+{
+  "name": "blocked_protected",
+  "version": 1,
+  "source": "Hand-authored demo script, not captured from a model run. Expects the demo fixture after POST /api/demo/reset. The run must stop at the blocked change, so the last two steps never execute.",
+  "instruction": "Archive every customer who has been inactive for more than a year, starting with the longest inactive.",
+  "steps": [
+    {"tool": "get_inactivity_report", "args": {"min_inactive_days": 365}},
+    {"tool": "get_customer", "args": {"account_id": "ACC-103"}},
+    {"tool": "update_customer_status", "args": {"account_id": "ACC-103", "new_status": "Archived", "reason": "Inactive 792 days per the inactivity report (threshold 365)", "expected_version": 1}},
+    {"tool": "get_customer", "args": {"account_id": "ACC-102"}},
+    {"tool": "update_customer_status", "args": {"account_id": "ACC-102", "new_status": "Archived", "reason": "Inactive 591 days per the inactivity report (threshold 365)", "expected_version": 1}}
+  ]
+}

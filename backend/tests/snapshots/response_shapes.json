@@ -1,0 +1,1688 @@
+{
+  "action_undo_available": {
+    "shape": {
+      "data": {
+        "account_id": "str",
+        "actor": "str",
+        "after": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "after_version": "int",
+        "approval": "null",
+        "arguments": {
+          "account_id": "str",
+          "expected_version": "int",
+          "new_status": "str",
+          "reason": "str"
+        },
+        "before": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "before_version": "int",
+        "created_at": "str",
+        "decision": "str",
+        "evidence": "null",
+        "flag": "null",
+        "id": "str",
+        "mode": "null",
+        "post_action_check": {
+          "checked_at": "str",
+          "checks": [
+            {
+              "actual": {
+                "meets_threshold": "bool"
+              },
+              "description": "str",
+              "expected": {
+                "meets_threshold": "bool"
+              },
+              "id": "str",
+              "passed": "bool"
+            }
+          ],
+          "scope": "str",
+          "stage": "str",
+          "verdict": "str"
+        },
+        "reason": "null",
+        "recovered_at": "null",
+        "recovery_state": "str",
+        "recovery_verification": "null",
+        "risk": "str",
+        "rule_id": "str",
+        "run_id": "str",
+        "scenario": "null",
+        "snapshot_sha256": "str",
+        "status": "str",
+        "tool_name": "str",
+        "undo_available": "bool",
+        "undo_disabled_reason": "null",
+        "undo_of_action_id": "null",
+        "verification": {
+          "checks": [
+            {
+              "actual": "int",
+              "description": "str",
+              "expected": "int",
+              "id": "str",
+              "passed": "bool"
+            }
+          ],
+          "scope": "str",
+          "stage": "str",
+          "verdict": "str"
+        }
+      },
+      "error": "null"
+    },
+    "status": 200
+  },
+  "action_undo_conflict_predicted": {
+    "shape": {
+      "data": {
+        "account_id": "str",
+        "actor": "str",
+        "after": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "after_version": "int",
+        "approval": "null",
+        "arguments": {
+          "account_id": "str",
+          "expected_version": "null",
+          "new_status": "str",
+          "reason": "str"
+        },
+        "before": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "before_version": "int",
+        "created_at": "str",
+        "decision": "str",
+        "evidence": "null",
+        "flag": "null",
+        "id": "str",
+        "mode": "null",
+        "post_action_check": {
+          "checked_at": "str",
+          "checks": [
+            {
+              "actual": {
+                "meets_threshold": "bool"
+              },
+              "description": "str",
+              "expected": {
+                "meets_threshold": "bool"
+              },
+              "id": "str",
+              "passed": "bool"
+            }
+          ],
+          "scope": "str",
+          "stage": "str",
+          "verdict": "str"
+        },
+        "reason": "null",
+        "recovered_at": "null",
+        "recovery_state": "str",
+        "recovery_verification": "null",
+        "risk": "str",
+        "rule_id": "str",
+        "run_id": "str",
+        "scenario": "null",
+        "snapshot_sha256": "str",
+        "status": "str",
+        "tool_name": "str",
+        "undo_available": "bool",
+        "undo_disabled_reason": "str",
+        "undo_of_action_id": "null",
+        "verification": {
+          "checks": [
+            {
+              "actual": "int",
+              "description": "str",
+              "expected": "int",
+              "id": "str",
+              "passed": "bool"
+            }
+          ],
+          "scope": "str",
+          "stage": "str",
+          "verdict": "str"
+        }
+      },
+      "error": "null"
+    },
+    "status": 200
+  },
+  "actions": {
+    "shape": {
+      "data": [
+        {
+          "account_id": "null",
+          "actor": "str",
+          "after": "null",
+          "after_version": "null",
+          "approval": "null",
+          "arguments": {
+            "account_id": "str",
+            "expected_version": "null",
+            "new_limit": "int",
+            "reason": "str"
+          },
+          "before": "null",
+          "before_version": "null",
+          "created_at": "str",
+          "decision": "str",
+          "evidence": "null",
+          "flag": "null",
+          "id": "str",
+          "mode": "null",
+          "post_action_check": "null",
+          "reason": "str",
+          "recovered_at": "null",
+          "recovery_state": "str",
+          "recovery_verification": "null",
+          "risk": "str",
+          "rule_id": "str",
+          "run_id": "null",
+          "scenario": "null",
+          "snapshot_sha256": "str",
+          "status": "str",
+          "tool_name": "str",
+          "undo_available": "bool",
+          "undo_disabled_reason": "str",
+          "undo_of_action_id": "null",
+          "verification": "null"
+        }
+      ],
+      "error": "null"
+    },
+    "status": 200
+  },
+  "agent_run_live_unconfigured": {
+    "shape": {
+      "data": "null",
+      "error": {
+        "code": "str",
+        "details": {
+          "missing_env": [
+            "str"
+          ],
+          "optional_env": [
+            "str"
+          ],
+          "required_env": [
+            "str"
+          ]
+        },
+        "message": "str"
+      }
+    },
+    "status": 503
+  },
+  "agent_run_replay": {
+    "shape": {
+      "data": {
+        "action_ids": [
+          "str"
+        ],
+        "final_summary": "str",
+        "instruction": "str",
+        "mode": "str",
+        "recorded_instruction": "str",
+        "run_id": "str",
+        "scenario": "str",
+        "script_source": "str",
+        "script_version": "int",
+        "status": "str",
+        "steps": [
+          {
+            "action_id": "null",
+            "args": {
+              "min_inactive_days": "int"
+            },
+            "http_status": "null",
+            "index": "int",
+            "mode": "str",
+            "outcome": "str",
+            "result_summary": "str",
+            "tool": "str"
+          }
+        ]
+      },
+      "error": "null"
+    },
+    "status": 200
+  },
+  "agent_run_replay_blocked": {
+    "shape": {
+      "data": {
+        "action_ids": [
+          "str"
+        ],
+        "final_summary": "str",
+        "instruction": "str",
+        "mode": "str",
+        "recorded_instruction": "str",
+        "run_id": "str",
+        "scenario": "str",
+        "script_source": "str",
+        "script_version": "int",
+        "status": "str",
+        "steps": [
+          {
+            "action_id": "null",
+            "args": {
+              "min_inactive_days": "int"
+            },
+            "http_status": "null",
+            "index": "int",
+            "mode": "str",
+            "outcome": "str",
+            "result_summary": "str",
+            "tool": "str"
+          }
+        ]
+      },
+      "error": "null"
+    },
+    "status": 200
+  },
+  "approve_not_pending": {
+    "shape": {
+      "data": "null",
+      "error": {
+        "code": "str",
+        "details": {
+          "action_id": "str",
+          "status": "str"
+        },
+        "message": "str"
+      }
+    },
+    "status": 409
+  },
+  "approve_pending": {
+    "shape": {
+      "data": {
+        "account_id": "str",
+        "actor": "str",
+        "after": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "after_version": "int",
+        "approval": {
+          "at": "str",
+          "decision": "str",
+          "note": "str",
+          "role": "str"
+        },
+        "arguments": {
+          "account_id": "str",
+          "expected_version": "null",
+          "new_status": "str",
+          "reason": "str"
+        },
+        "before": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "before_version": "int",
+        "created_at": "str",
+        "decision": "str",
+        "evidence": "null",
+        "flag": "null",
+        "id": "str",
+        "mode": "null",
+        "post_action_check": {
+          "checked_at": "str",
+          "checks": [
+            {
+              "actual": {
+                "meets_threshold": "bool"
+              },
+              "description": "str",
+              "expected": {
+                "meets_threshold": "bool"
+              },
+              "id": "str",
+              "passed": "bool"
+            }
+          ],
+          "scope": "str",
+          "stage": "str",
+          "verdict": "str"
+        },
+        "reason": "str",
+        "recovered_at": "null",
+        "recovery_state": "str",
+        "recovery_verification": "null",
+        "risk": "str",
+        "rule_id": "str",
+        "run_id": "str",
+        "scenario": "null",
+        "snapshot_sha256": "str",
+        "status": "str",
+        "tool_name": "str",
+        "undo_available": "bool",
+        "undo_disabled_reason": "null",
+        "undo_of_action_id": "null",
+        "verification": {
+          "checks": [
+            {
+              "actual": "int",
+              "description": "str",
+              "expected": "int",
+              "id": "str",
+              "passed": "bool"
+            }
+          ],
+          "scope": "str",
+          "stage": "str",
+          "verdict": "str"
+        }
+      },
+      "error": "null"
+    },
+    "status": 200
+  },
+  "audit_export": {
+    "shape": {
+      "data": {
+        "action_count": "int",
+        "actions": [
+          {
+            "account_id": "str",
+            "actor": "str",
+            "after": {
+              "account_id": "str",
+              "last_activity_at": "str",
+              "name": "str",
+              "phone": "str",
+              "protected": "bool",
+              "status": "str",
+              "version": "int"
+            },
+            "after_version": "int",
+            "approval": {
+              "at": "str",
+              "decision": "str",
+              "note": "str",
+              "role": "str"
+            },
+            "arguments": {
+              "account_id": "str",
+              "expected_version": "null",
+              "new_status": "str",
+              "reason": "str"
+            },
+            "before": {
+              "account_id": "str",
+              "last_activity_at": "str",
+              "name": "str",
+              "phone": "str",
+              "protected": "bool",
+              "status": "str",
+              "version": "int"
+            },
+            "before_version": "int",
+            "created_at": "str",
+            "decision": "str",
+            "evidence": "null",
+            "flag": "null",
+            "id": "str",
+            "mode": "null",
+            "post_action_check": "null",
+            "reason": "str",
+            "recovered_at": "null",
+            "recovery_state": "str",
+            "recovery_verification": "null",
+            "risk": "str",
+            "rule_id": "str",
+            "run_id": "str",
+            "scenario": "null",
+            "snapshot_sha256": "str",
+            "status": "str",
+            "tool_name": "str",
+            "undo_available": "bool",
+            "undo_disabled_reason": "str",
+            "undo_of_action_id": "null",
+            "verification": "null"
+          }
+        ],
+        "exported_at": "str",
+        "exported_by_role": "str",
+        "integrity_check": "str",
+        "pii_masked": "bool"
+      },
+      "error": "null"
+    },
+    "status": 200
+  },
+  "audit_export_forbidden": {
+    "shape": {
+      "data": "null",
+      "error": {
+        "code": "str",
+        "details": {
+          "required": [
+            "str"
+          ],
+          "role": "str"
+        },
+        "message": "str"
+      }
+    },
+    "status": 403
+  },
+  "credit_blocked": {
+    "shape": {
+      "data": {
+        "action_id": "str",
+        "after": {
+          "account_id": "str",
+          "credit_limit": "int",
+          "currency": "str",
+          "version": "int"
+        },
+        "before": {
+          "account_id": "str",
+          "credit_limit": "int",
+          "currency": "str",
+          "version": "int"
+        },
+        "decision": "str",
+        "reason": "str",
+        "risk": "str",
+        "rule_id": "str",
+        "scenario": "null",
+        "status": "str"
+      },
+      "error": {
+        "code": "str",
+        "details": {
+          "rule_id": "str"
+        },
+        "message": "str"
+      }
+    },
+    "status": 403
+  },
+  "credit_lines": {
+    "shape": {
+      "data": [
+        {
+          "account_id": "str",
+          "credit_limit": "int",
+          "currency": "str",
+          "version": "int"
+        }
+      ],
+      "error": "null"
+    },
+    "status": 200
+  },
+  "credit_not_found": {
+    "shape": {
+      "data": "null",
+      "error": {
+        "code": "str",
+        "details": {
+          "account_id": "str",
+          "action_id": "str"
+        },
+        "message": "str"
+      }
+    },
+    "status": 404
+  },
+  "credit_pending": {
+    "shape": {
+      "data": {
+        "action_id": "str",
+        "after": {
+          "account_id": "str",
+          "credit_limit": "int",
+          "currency": "str",
+          "version": "int"
+        },
+        "before": {
+          "account_id": "str",
+          "credit_limit": "int",
+          "currency": "str",
+          "version": "int"
+        },
+        "decision": "str",
+        "reason": "str",
+        "risk": "str",
+        "rule_id": "str",
+        "scenario": "null",
+        "status": "str"
+      },
+      "error": "null"
+    },
+    "status": 202
+  },
+  "credit_undo": {
+    "shape": {
+      "data": {
+        "action_id": "str",
+        "after": {
+          "account_id": "str",
+          "credit_limit": "int",
+          "currency": "str",
+          "version": "int"
+        },
+        "already_recovered": "bool",
+        "before": {
+          "account_id": "str",
+          "credit_limit": "int",
+          "currency": "str",
+          "version": "int"
+        },
+        "status": "str",
+        "undo_action_id": "str",
+        "verification": {
+          "checked_at": "str",
+          "checks": [
+            {
+              "actual": "int",
+              "description": "str",
+              "expected": "int",
+              "id": "str",
+              "passed": "bool"
+            }
+          ],
+          "scope": "str",
+          "stage": "str",
+          "verdict": "str"
+        }
+      },
+      "error": "null"
+    },
+    "status": 200
+  },
+  "credit_update_executed": {
+    "shape": {
+      "data": {
+        "action_id": "str",
+        "after": {
+          "account_id": "str",
+          "credit_limit": "int",
+          "currency": "str",
+          "version": "int"
+        },
+        "before": {
+          "account_id": "str",
+          "credit_limit": "int",
+          "currency": "str",
+          "version": "int"
+        },
+        "decision": "str",
+        "post_action_check": "null",
+        "reason": "null",
+        "recovery_state": "str",
+        "risk": "str",
+        "rule_id": "str",
+        "scenario": "null",
+        "status": "str",
+        "verification": {
+          "checks": [
+            {
+              "actual": "int",
+              "description": "str",
+              "expected": "int",
+              "id": "str",
+              "passed": "bool"
+            }
+          ],
+          "scope": "str",
+          "stage": "str",
+          "verdict": "str"
+        }
+      },
+      "error": "null"
+    },
+    "status": 200
+  },
+  "customers": {
+    "shape": {
+      "data": [
+        {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        }
+      ],
+      "error": "null"
+    },
+    "status": 200
+  },
+  "metrics": {
+    "shape": {
+      "data": {
+        "actions": {
+          "blocked": "int",
+          "by_status": {
+            "blocked": "int",
+            "denied": "int",
+            "executed": "int",
+            "pending_approval": "int",
+            "rejected": "int"
+          },
+          "executed": "int",
+          "flagged": "int",
+          "total": "int"
+        },
+        "assumptions": [
+          "str"
+        ],
+        "false_verified": {
+          "count": "int",
+          "lab": "null",
+          "ledger": "int"
+        },
+        "lab": {
+          "available": "bool",
+          "file": "str"
+        },
+        "measured_at": "str",
+        "recoveries": {
+          "conflict_detected": "int",
+          "failed": "int",
+          "manual_review_required": "int",
+          "total": "int",
+          "unverified": "int",
+          "verified": "int"
+        },
+        "time_to_verified_recovery_seconds": {
+          "excluded_no_timestamp": "int",
+          "max": "float",
+          "median": "float",
+          "samples": "int"
+        }
+      },
+      "error": "null"
+    },
+    "status": 200
+  },
+  "reject_pending": {
+    "shape": {
+      "data": {
+        "account_id": "str",
+        "actor": "str",
+        "after": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "after_version": "int",
+        "approval": {
+          "at": "str",
+          "decision": "str",
+          "note": "str",
+          "role": "str"
+        },
+        "arguments": {
+          "account_id": "str",
+          "expected_version": "null",
+          "new_status": "str",
+          "reason": "str"
+        },
+        "before": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "before_version": "int",
+        "created_at": "str",
+        "decision": "str",
+        "evidence": "null",
+        "flag": "null",
+        "id": "str",
+        "mode": "null",
+        "post_action_check": "null",
+        "reason": "str",
+        "recovered_at": "null",
+        "recovery_state": "str",
+        "recovery_verification": "null",
+        "risk": "str",
+        "rule_id": "str",
+        "run_id": "str",
+        "scenario": "null",
+        "snapshot_sha256": "str",
+        "status": "str",
+        "tool_name": "str",
+        "undo_available": "bool",
+        "undo_disabled_reason": "str",
+        "undo_of_action_id": "null",
+        "verification": "null"
+      },
+      "error": "null"
+    },
+    "status": 200
+  },
+  "reset": {
+    "shape": {
+      "data": {
+        "credit_lines": [
+          {
+            "account_id": "str",
+            "credit_limit": "int",
+            "currency": "str",
+            "version": "int"
+          }
+        ],
+        "customers": [
+          {
+            "account_id": "str",
+            "last_activity_at": "str",
+            "name": "str",
+            "phone": "str",
+            "protected": "bool",
+            "status": "str",
+            "version": "int"
+          }
+        ],
+        "demo_now": "str",
+        "ledger_entries": "int",
+        "status": "str",
+        "summary": {
+          "active": "int",
+          "archived": "int",
+          "protected": "int",
+          "roles": {
+            "ACC-101": "str",
+            "ACC-102": "str",
+            "ACC-103": "str",
+            "ACC-104": "str",
+            "ACC-105": "str",
+            "ACC-106": "str",
+            "ACC-107": "str",
+            "ACC-108": "str"
+          },
+          "total": "int"
+        }
+      },
+      "error": "null"
+    },
+    "status": 200
+  },
+  "reset_refused": {
+    "shape": {
+      "data": "null",
+      "error": {
+        "code": "str",
+        "details": "null",
+        "message": "str"
+      }
+    },
+    "status": 403
+  },
+  "route_not_found": {
+    "shape": {
+      "data": "null",
+      "error": {
+        "code": "str",
+        "details": "null",
+        "message": "str"
+      }
+    },
+    "status": 404
+  },
+  "run_evidence": {
+    "shape": {
+      "data": {
+        "actions": [
+          {
+            "action_id": "str",
+            "actor": "str",
+            "after": {
+              "account_id": "str",
+              "last_activity_at": "str",
+              "name": "str",
+              "phone": "str",
+              "protected": "bool",
+              "status": "str",
+              "version": "int"
+            },
+            "approval": "null",
+            "args": {
+              "account_id": "str",
+              "expected_version": "int",
+              "new_status": "str",
+              "reason": "str"
+            },
+            "before": {
+              "account_id": "str",
+              "last_activity_at": "str",
+              "name": "str",
+              "phone": "str",
+              "protected": "bool",
+              "status": "str",
+              "version": "int"
+            },
+            "flag": "null",
+            "mode": "str",
+            "policy": {
+              "decision": "str",
+              "reason": "null",
+              "risk": "str",
+              "rule_id": "str"
+            },
+            "post_action_check": {
+              "checked_at": "str",
+              "checks": [
+                {
+                  "actual": {
+                    "meets_threshold": "bool"
+                  },
+                  "description": "str",
+                  "expected": {
+                    "meets_threshold": "bool"
+                  },
+                  "id": "str",
+                  "passed": "bool"
+                }
+              ],
+              "scope": "str",
+              "stage": "str",
+              "verdict": "str"
+            },
+            "pre_commit_guard": {
+              "checks": [
+                {
+                  "actual": "int",
+                  "description": "str",
+                  "expected": "int",
+                  "id": "str",
+                  "passed": "bool"
+                }
+              ],
+              "scope": "str",
+              "stage": "str",
+              "verdict": "str"
+            },
+            "recovery": {
+              "attempts": [
+                {
+                  "actor": "str",
+                  "created_at": "str",
+                  "reason": "null",
+                  "status": "str",
+                  "undo_action_id": "str",
+                  "verification": {
+                    "checked_at": "str",
+                    "checks": [
+                      {
+                        "actual": "str",
+                        "description": "str",
+                        "expected": "str",
+                        "id": "str",
+                        "passed": "bool"
+                      }
+                    ],
+                    "scope": "str",
+                    "stage": "str",
+                    "verdict": "str"
+                  }
+                }
+              ],
+              "recovered_at": "str",
+              "state": "str"
+            },
+            "scenario": "null",
+            "status": "str",
+            "tool": "str"
+          }
+        ],
+        "final_state": {
+          "customers/ACC-102": {
+            "account_id": "str",
+            "last_activity_at": "str",
+            "name": "str",
+            "phone": "str",
+            "protected": "bool",
+            "status": "str",
+            "version": "int"
+          },
+          "customers/ACC-105": {
+            "account_id": "str",
+            "last_activity_at": "str",
+            "name": "str",
+            "phone": "str",
+            "protected": "bool",
+            "status": "str",
+            "version": "int"
+          }
+        },
+        "final_summary": "str",
+        "instruction": "str",
+        "mode": "str",
+        "provider": "null",
+        "recorded_run": "bool",
+        "run_id": "str",
+        "scenario": "str",
+        "status": "str",
+        "steps": [
+          {
+            "action_id": "null",
+            "args": {
+              "min_inactive_days": "int"
+            },
+            "http_status": "null",
+            "index": "int",
+            "mode": "str",
+            "outcome": "str",
+            "result_summary": "str",
+            "tool": "str"
+          }
+        ]
+      },
+      "error": "null"
+    },
+    "status": 200
+  },
+  "run_evidence_not_found": {
+    "shape": {
+      "data": "null",
+      "error": {
+        "code": "str",
+        "details": {
+          "run_id": "str"
+        },
+        "message": "str"
+      }
+    },
+    "status": 404
+  },
+  "undo_conflict": {
+    "shape": {
+      "data": {
+        "action_id": "str",
+        "current_customer": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "differences": {
+          "status": {
+            "current": "str",
+            "expected": "str"
+          },
+          "version": {
+            "current": "int",
+            "expected": "int"
+          }
+        },
+        "expected_after": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "expected_version": "int",
+        "reason": "str",
+        "status": "str",
+        "undo_action_id": "str",
+        "verification": {
+          "checked_at": "str",
+          "checks": [
+            {
+              "actual": {
+                "matches_recorded_after_state": "bool"
+              },
+              "description": "str",
+              "expected": {
+                "matches_recorded_after_state": "bool"
+              },
+              "id": "str",
+              "passed": "bool"
+            }
+          ],
+          "scope": "str",
+          "stage": "str",
+          "verdict": "str"
+        }
+      },
+      "error": {
+        "code": "str",
+        "details": {
+          "differences": {
+            "status": {
+              "current": "str",
+              "expected": "str"
+            },
+            "version": {
+              "current": "int",
+              "expected": "int"
+            }
+          }
+        },
+        "message": "str"
+      }
+    },
+    "status": 409
+  },
+  "undo_not_found": {
+    "shape": {
+      "data": "null",
+      "error": {
+        "code": "str",
+        "details": {
+          "action_id": "str"
+        },
+        "message": "str"
+      }
+    },
+    "status": 404
+  },
+  "undo_not_undoable": {
+    "shape": {
+      "data": "null",
+      "error": {
+        "code": "str",
+        "details": {
+          "action_id": "str",
+          "status": "str",
+          "tool": "str"
+        },
+        "message": "str"
+      }
+    },
+    "status": 409
+  },
+  "undo_repeat": {
+    "shape": {
+      "data": {
+        "action_id": "str",
+        "after": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "already_recovered": "bool",
+        "before": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "status": "str",
+        "undo_action_id": "str",
+        "verification": {
+          "checked_at": "str",
+          "checks": [
+            {
+              "actual": "str",
+              "description": "str",
+              "expected": "str",
+              "id": "str",
+              "passed": "bool"
+            }
+          ],
+          "scope": "str",
+          "stage": "str",
+          "verdict": "str"
+        }
+      },
+      "error": "null"
+    },
+    "status": 200
+  },
+  "undo_verified": {
+    "shape": {
+      "data": {
+        "action_id": "str",
+        "after": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "already_recovered": "bool",
+        "before": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "status": "str",
+        "undo_action_id": "str",
+        "verification": {
+          "checked_at": "str",
+          "checks": [
+            {
+              "actual": "str",
+              "description": "str",
+              "expected": "str",
+              "id": "str",
+              "passed": "bool"
+            }
+          ],
+          "scope": "str",
+          "stage": "str",
+          "verdict": "str"
+        }
+      },
+      "error": "null"
+    },
+    "status": 200
+  },
+  "update_blocked_protected": {
+    "shape": {
+      "data": {
+        "action_id": "str",
+        "after": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "before": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "decision": "str",
+        "reason": "str",
+        "risk": "str",
+        "rule_id": "str",
+        "scenario": "null",
+        "status": "str"
+      },
+      "error": {
+        "code": "str",
+        "details": {
+          "rule_id": "str"
+        },
+        "message": "str"
+      }
+    },
+    "status": 403
+  },
+  "update_blocked_recent": {
+    "shape": {
+      "data": {
+        "action_id": "str",
+        "after": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "before": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "decision": "str",
+        "reason": "str",
+        "risk": "str",
+        "rule_id": "str",
+        "scenario": "null",
+        "status": "str"
+      },
+      "error": {
+        "code": "str",
+        "details": {
+          "rule_id": "str"
+        },
+        "message": "str"
+      }
+    },
+    "status": 403
+  },
+  "update_executed": {
+    "shape": {
+      "data": {
+        "action_id": "str",
+        "after": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "before": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "decision": "str",
+        "post_action_check": {
+          "checked_at": "str",
+          "checks": [
+            {
+              "actual": {
+                "meets_threshold": "bool"
+              },
+              "description": "str",
+              "expected": {
+                "meets_threshold": "bool"
+              },
+              "id": "str",
+              "passed": "bool"
+            }
+          ],
+          "scope": "str",
+          "stage": "str",
+          "verdict": "str"
+        },
+        "reason": "null",
+        "recovery_state": "str",
+        "risk": "str",
+        "rule_id": "str",
+        "scenario": "null",
+        "status": "str",
+        "verification": {
+          "checks": [
+            {
+              "actual": "int",
+              "description": "str",
+              "expected": "int",
+              "id": "str",
+              "passed": "bool"
+            }
+          ],
+          "scope": "str",
+          "stage": "str",
+          "verdict": "str"
+        }
+      },
+      "error": "null"
+    },
+    "status": 200
+  },
+  "update_executed_2": {
+    "shape": {
+      "data": {
+        "action_id": "str",
+        "after": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "before": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "decision": "str",
+        "post_action_check": {
+          "checked_at": "str",
+          "checks": [
+            {
+              "actual": {
+                "meets_threshold": "bool"
+              },
+              "description": "str",
+              "expected": {
+                "meets_threshold": "bool"
+              },
+              "id": "str",
+              "passed": "bool"
+            }
+          ],
+          "scope": "str",
+          "stage": "str",
+          "verdict": "str"
+        },
+        "reason": "null",
+        "recovery_state": "str",
+        "risk": "str",
+        "rule_id": "str",
+        "scenario": "null",
+        "status": "str",
+        "verification": {
+          "checks": [
+            {
+              "actual": "int",
+              "description": "str",
+              "expected": "int",
+              "id": "str",
+              "passed": "bool"
+            }
+          ],
+          "scope": "str",
+          "stage": "str",
+          "verdict": "str"
+        }
+      },
+      "error": "null"
+    },
+    "status": 200
+  },
+  "update_malformed": {
+    "shape": {
+      "data": "null",
+      "error": {
+        "code": "str",
+        "details": [
+          {
+            "input": {
+              "account_id": "str",
+              "new_status": "str"
+            },
+            "loc": [
+              "str"
+            ],
+            "msg": "str",
+            "type": "str"
+          }
+        ],
+        "message": "str"
+      }
+    },
+    "status": 422
+  },
+  "update_newer_edit": {
+    "shape": {
+      "data": {
+        "action_id": "str",
+        "after": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "before": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "decision": "str",
+        "post_action_check": "null",
+        "reason": "null",
+        "recovery_state": "str",
+        "risk": "str",
+        "rule_id": "str",
+        "scenario": "null",
+        "status": "str",
+        "verification": {
+          "checks": [
+            {
+              "actual": "int",
+              "description": "str",
+              "expected": "int",
+              "id": "str",
+              "passed": "bool"
+            }
+          ],
+          "scope": "str",
+          "stage": "str",
+          "verdict": "str"
+        }
+      },
+      "error": "null"
+    },
+    "status": 200
+  },
+  "update_no_change": {
+    "shape": {
+      "data": {
+        "action_id": "str",
+        "after": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "before": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "decision": "str",
+        "reason": "str",
+        "risk": "str",
+        "rule_id": "str",
+        "scenario": "null",
+        "status": "str"
+      },
+      "error": {
+        "code": "str",
+        "details": {
+          "rule_id": "str"
+        },
+        "message": "str"
+      }
+    },
+    "status": 409
+  },
+  "update_not_found": {
+    "shape": {
+      "data": "null",
+      "error": {
+        "code": "str",
+        "details": {
+          "account_id": "str",
+          "action_id": "str"
+        },
+        "message": "str"
+      }
+    },
+    "status": 404
+  },
+  "update_pending_approval": {
+    "shape": {
+      "data": {
+        "action_id": "str",
+        "after": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "before": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "decision": "str",
+        "reason": "str",
+        "risk": "str",
+        "rule_id": "str",
+        "scenario": "null",
+        "status": "str"
+      },
+      "error": "null"
+    },
+    "status": 202
+  },
+  "update_pending_approval_2": {
+    "shape": {
+      "data": {
+        "action_id": "str",
+        "after": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "before": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "decision": "str",
+        "reason": "str",
+        "risk": "str",
+        "rule_id": "str",
+        "scenario": "null",
+        "status": "str"
+      },
+      "error": "null"
+    },
+    "status": 202
+  },
+  "update_role_forbidden": {
+    "shape": {
+      "data": "null",
+      "error": {
+        "code": "str",
+        "details": {
+          "required": [
+            "str"
+          ],
+          "role": "str"
+        },
+        "message": "str"
+      }
+    },
+    "status": 403
+  },
+  "update_role_missing": {
+    "shape": {
+      "data": "null",
+      "error": {
+        "code": "str",
+        "details": {
+          "roles": [
+            "str"
+          ]
+        },
+        "message": "str"
+      }
+    },
+    "status": 401
+  },
+  "update_version_conflict": {
+    "shape": {
+      "data": "null",
+      "error": {
+        "code": "str",
+        "details": {
+          "current_version": "int",
+          "expected_version": "int"
+        },
+        "message": "str"
+      }
+    },
+    "status": 409
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "archive_inactive",
+  "version": 1,
+  "source": "Hand-authored demo script, not captured from a model run. Expects the demo fixture after POST /api/demo/reset.",
+  "instruction": "Archive every customer who has been inactive for more than a year.",
+  "steps": [
+    {"tool": "get_inactivity_report", "args": {"min_inactive_days": 365}},
+    {"tool": "get_customer", "args": {"account_id": "ACC-102"}},
+    {"tool": "update_customer_status", "args": {"account_id": "ACC-102", "new_status": "Archived", "reason": "Inactive 591 days per the inactivity report (threshold 365)", "expected_version": 1}},
+    {"tool": "get_customer", "args": {"account_id": "ACC-105"}},
+    {"tool": "update_customer_status", "args": {"account_id": "ACC-105", "new_status": "Archived", "reason": "Inactive 420 days per the inactivity report (threshold 365)", "expected_version": 1}}
+  ]
+}

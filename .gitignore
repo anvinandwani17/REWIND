@@ -3,3 +3,11 @@ backend/*.db
 __pycache__/
 .pytest_cache/
 .env
+.env.*
+!.env.example
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+.venv/
+backend/data/
