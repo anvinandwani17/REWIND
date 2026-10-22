@@ -5,18 +5,26 @@ from fastapi.testclient import TestClient
 
 import db
 import demo
+import gateway
 import main
+import tools
+
+UPDATE = "/api/tools/update-customer-status"
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("REWIND_DB_PATH", str(tmp_path / "test.db"))
     monkeypatch.setenv("REWIND_DEMO_MODE", "1")
+    for name in ("REWIND_RECENT_ACTIVITY_DAYS", "REWIND_BULK_APPROVAL_THRESHOLD",
+                 "REWIND_FAULT_DISABLE_RECENT_ACTIVITY"):
+        monkeypatch.delenv(name, raising=False)
     with TestClient(main.app) as c:
         yield c
 
 
 def snapshot():
+    """Raw rows straight from SQLite, for byte-level before/after comparison."""
     with db.connect() as conn:
         return (
             [dict(r) for r in conn.execute("SELECT * FROM customers ORDER BY account_id")],
@@ -24,16 +32,25 @@ def snapshot():
         )
 
 
-def archive(client, account_id):
-    return client.post(
-        "/api/tools/update-customer-status",
-        json={"account_id": account_id, "new_status": "Archived", "run_id": "run-1"},
-    )
+def update(client, account_id, new_status="Archived", **extra):
+    body = {"account_id": account_id, "new_status": new_status,
+            "reason": "inactive for over a year", "run_id": "run-1", **extra}
+    return client.post(UPDATE, json=body)
+
+
+def archive(client, account_id, **extra):
+    return update(client, account_id, "Archived", **extra)
 
 
 def customer(client, account_id):
     return next(c for c in client.get("/api/customers").json() if c["account_id"] == account_id)
 
+
+def actions(client):
+    return client.get("/api/actions").json()
+
+
+# --- startup / schema / reset -------------------------------------------------
 
 def test_import_and_startup_never_wipe_data(client):
     assert archive(client, "ACC-102").status_code == 200
@@ -41,125 +58,6 @@ def test_import_and_startup_never_wipe_data(client):
     with TestClient(main.app) as fresh:
         assert customer(fresh, "ACC-102")["status"] == "Archived"
         assert len(fresh.get("/api/actions").json()) == 1
-
-
-def test_archive_executes_and_is_logged(client):
-    response = archive(client, "ACC-102")
-    body = response.json()
-    assert response.status_code == 200
-    assert body["status"] == "executed"
-    assert body["before"]["status"] == "Active"
-    assert body["after"]["status"] == "Archived"
-    assert body["after"]["version"] == body["before"]["version"] + 1
-
-    [action] = client.get("/api/actions").json()
-    assert action["id"] == body["action_id"]
-    assert action["run_id"] == "run-1"
-    assert action["recovery_state"] == "available"
-
-
-def test_protected_customer_is_blocked_and_logged(client):
-    response = archive(client, "ACC-103")
-    assert response.status_code == 403
-    assert response.json()["status"] == "blocked"
-    assert customer(client, "ACC-103")["status"] == "Active"
-    assert customer(client, "ACC-103")["version"] == 1
-    [action] = client.get("/api/actions").json()
-    assert action["status"] == "blocked"
-    assert action["recovery_state"] == "unavailable"
-
-
-def test_noop_update_is_blocked(client):
-    response = client.post(
-        "/api/tools/update-customer-status",
-        json={"account_id": "ACC-101", "new_status": "Active"},
-    )
-    assert response.status_code == 409
-    assert response.json()["status"] == "blocked"
-    assert customer(client, "ACC-101")["version"] == 1
-
-
-def test_undo_restores_and_verifies(client):
-    action_id = archive(client, "ACC-102").json()["action_id"]
-    response = client.post(f"/api/actions/{action_id}/undo")
-    body = response.json()
-    assert response.status_code == 200
-    assert body["status"] == "verified"
-    assert all(body["checks"].values())
-    assert customer(client, "ACC-102")["status"] == "Active"
-    assert customer(client, "ACC-102")["version"] == 3
-
-    again = client.post(f"/api/actions/{action_id}/undo")
-    assert again.status_code == 409
-    assert again.json()["status"] == "refused"
-
-
-def test_undo_refuses_to_overwrite_newer_edit(client):
-    action_id = archive(client, "ACC-102").json()["action_id"]
-    with db.transaction() as conn:
-        conn.execute(
-            "UPDATE customers SET name = 'Edited', version = version + 1"
-            " WHERE account_id = 'ACC-102'"
-        )
-
-    response = client.post(f"/api/actions/{action_id}/undo")
-    assert response.status_code == 409
-    assert response.json()["status"] == "conflict_detected"
-    current = customer(client, "ACC-102")
-    assert (current["name"], current["status"], current["version"]) == ("Edited", "Archived", 3)
-
-
-def test_errors_use_status_reason_shape(client):
-    missing = archive(client, "ACC-999")
-    assert missing.status_code == 404
-    assert missing.json() == {"status": "error", "reason": "Customer not found"}
-
-    undo = client.post("/api/actions/nope/undo")
-    assert undo.status_code == 404
-    assert undo.json() == {"status": "error", "reason": "Action not found"}
-
-
-def test_update_is_verified_in_its_own_transaction(client):
-    body = archive(client, "ACC-102").json()
-    assert body["verification"]["status"] == "verified"
-    assert body["verification"]["checks"] == {
-        "requested_status_applied": True,
-        "version_incremented": True,
-        "unrelated_records_unchanged": True,
-        "database_integrity_ok": True,
-    }
-
-
-def failed_check(*args):
-    return {"status": "failed", "checks": {"forced": False}, "current_customer": None}
-
-
-def test_failed_update_verification_rolls_back_write_but_logs(client, monkeypatch):
-    import verification
-    monkeypatch.setattr(verification, "verify_update", failed_check)
-
-    response = archive(client, "ACC-102")
-    assert response.status_code == 500
-    assert response.json()["status"] == "failed"
-    assert customer(client, "ACC-102")["status"] == "Active"
-    assert customer(client, "ACC-102")["version"] == 1
-    [action] = client.get("/api/actions").json()
-    assert (action["status"], action["recovery_state"]) == ("failed", "unavailable")
-
-
-def test_failed_restore_verification_rolls_back_restore(client, monkeypatch):
-    import verification
-    action_id = archive(client, "ACC-102").json()["action_id"]
-    monkeypatch.setattr(verification, "verify_restore", failed_check)
-
-    response = client.post(f"/api/actions/{action_id}/undo")
-    assert response.status_code == 500
-    assert response.json()["status"] == "failed"
-    assert customer(client, "ACC-102")["status"] == "Archived"
-    assert customer(client, "ACC-102")["version"] == 2
-    [action] = client.get("/api/actions").json()
-    assert action["recovery_state"] == "verification_failed"
-    assert action["recovered_at"] is None
 
 
 def test_schema_init_is_idempotent_and_preserves_rows(client):
@@ -211,5 +109,282 @@ def test_reset_refused_when_demo_mode_off(client, monkeypatch):
 
     response = client.post("/api/demo/reset")
     assert response.status_code == 403
-    assert response.json()["status"] == "error"
+    assert response.json()["error"]["code"] == "demo_mode_off"
     assert snapshot() == before
+
+
+# --- read tools -----------------------------------------------------------------
+
+def test_inactivity_report_explains_age(client):
+    report = tools.get_inactivity_report(min_inactive_days=365)
+    assert report["as_of"] == "2026-10-22T12:00:00+00:00"
+    rows = {r["account_id"]: r for r in report["customers"]}
+    assert (rows["ACC-102"]["inactive_days"], rows["ACC-102"]["meets_threshold"]) == (591, True)
+    assert (rows["ACC-101"]["inactive_days"], rows["ACC-101"]["meets_threshold"]) == (7, False)
+    assert rows["ACC-103"]["protected"] is True
+
+    later = tools.get_inactivity_report(min_inactive_days=0, as_of="2026-10-25T12:00:00Z")
+    assert {r["account_id"]: r for r in later["customers"]}["ACC-101"]["inactive_days"] == 10
+
+
+# --- gateway: allowed path ---------------------------------------------------------
+
+def test_authorized_update_changes_exactly_one_row(client):
+    customers_before, _ = snapshot()
+    response = archive(client, "ACC-102", expected_version=1)
+    body = response.json()
+    assert response.status_code == 200
+    assert (body["status"], body["decision"], body["rule_id"]) == ("executed", "allow", "default_allow")
+
+    customers_after, ledger_rows = snapshot()
+    changed = [a for b, a in zip(customers_before, customers_after) if a != b]
+    assert len(changed) == 1
+    assert changed[0]["account_id"] == "ACC-102"
+    assert changed[0]["status"] == "Archived"
+    assert changed[0]["version"] == 2
+
+    [row] = ledger_rows
+    assert (row["status"], row["account_id"]) == ("executed", "ACC-102")
+    assert (row["before_version"], row["after_version"]) == (1, 2)
+    [action] = actions(client)
+    before_api = {**customers_before[1], "protected": False}
+    assert action["before"] == before_api == body["before"]
+    assert action["after"] == {**changed[0], "protected": False} == body["after"]
+    assert action["arguments"]["reason"] == "inactive for over a year"
+    assert action["run_id"] == "run-1"
+    assert action["recovery_state"] == "available"
+    assert all(body["verification"]["checks"].values())
+
+
+def test_get_action_by_id(client):
+    action_id = archive(client, "ACC-102").json()["action_id"]
+    response = client.get(f"/api/actions/{action_id}")
+    assert response.status_code == 200
+    assert response.json() == actions(client)[0]
+
+    missing = client.get("/api/actions/nope")
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "action_not_found"
+
+
+# --- gateway: policy blocks ----------------------------------------------------------
+
+def test_protected_customer_blocked_and_row_byte_identical(client):
+    before = snapshot()[0]
+    response = archive(client, "ACC-103")
+    assert response.status_code == 403
+    body = response.json()
+    assert (body["status"], body["decision"], body["rule_id"]) == ("blocked", "block", "protected_customer")
+
+    after, ledger_rows = snapshot()
+    assert after == before
+    [row] = ledger_rows
+    assert (row["status"], row["decision"], row["rule_id"]) == ("blocked", "block", "protected_customer")
+    assert row["before_json"] == row["after_json"]
+
+
+def test_noop_update_is_blocked(client):
+    response = update(client, "ACC-101", "Active")
+    assert response.status_code == 409
+    assert response.json()["rule_id"] == "no_change"
+    assert customer(client, "ACC-101")["version"] == 1
+
+
+def test_unknown_status_is_blocked_and_logged(client):
+    before = snapshot()[0]
+    response = update(client, "ACC-102", "Deleted")
+    assert response.status_code == 403
+    assert response.json()["rule_id"] == "unknown_status"
+    assert snapshot()[0] == before
+    assert actions(client)[0]["status"] == "blocked"
+
+
+def test_recent_activity_blocks_archiving(client):
+    before = snapshot()[0]
+    response = archive(client, "ACC-101")  # active 7 days ago
+    assert response.status_code == 403
+    assert response.json()["rule_id"] == "recent_activity"
+    assert "7 days" in response.json()["reason"]
+    assert snapshot()[0] == before
+
+
+def test_recent_activity_window_is_configurable(client, monkeypatch):
+    monkeypatch.setenv("REWIND_RECENT_ACTIVITY_DAYS", "5")
+    assert archive(client, "ACC-101").status_code == 200
+
+
+def test_injected_fault_disables_only_recent_activity_and_is_labelled(client, monkeypatch):
+    monkeypatch.setenv("REWIND_FAULT_DISABLE_RECENT_ACTIVITY", "1")
+
+    response = archive(client, "ACC-101")
+    body = response.json()
+    assert response.status_code == 200
+    assert body["scenario"] == "injected_fault"
+    assert body["reason"].startswith("INJECTED FAULT")
+    assert actions(client)[0]["scenario"] == "injected_fault"
+
+    # Other rules still apply.
+    assert archive(client, "ACC-106").json()["rule_id"] == "protected_customer"
+
+
+def test_injected_fault_flag_ignored_outside_demo_mode(client, monkeypatch):
+    monkeypatch.setenv("REWIND_FAULT_DISABLE_RECENT_ACTIVITY", "1")
+    monkeypatch.delenv("REWIND_DEMO_MODE")
+    monkeypatch.setenv("REWIND_RECENT_ACTIVITY_DAYS", "100000")  # real clock: block everyone
+
+    response = archive(client, "ACC-101")
+    assert response.status_code == 403
+    assert response.json()["rule_id"] == "recent_activity"
+    assert response.json()["scenario"] is None
+
+
+def test_bulk_changes_above_threshold_require_approval(client, monkeypatch):
+    monkeypatch.setenv("REWIND_BULK_APPROVAL_THRESHOLD", "1")
+    assert archive(client, "ACC-102").status_code == 200
+
+    before = snapshot()[0]
+    response = archive(client, "ACC-105")
+    assert response.status_code == 202
+    body = response.json()
+    assert (body["status"], body["decision"], body["rule_id"]) == (
+        "pending_approval", "require_approval", "bulk_change")
+    assert snapshot()[0] == before
+    assert actions(client)[0]["status"] == "pending_approval"
+
+    # A different run is counted separately.
+    assert archive(client, "ACC-105", run_id="run-2").status_code == 200
+
+
+# --- gateway: rejected / malformed / conflict / atomicity ------------------------------
+
+def test_invalid_account_returns_404_error_and_never_executes(client):
+    before = snapshot()[0]
+    response = archive(client, "ACC-999")
+    assert response.status_code == 404
+    error = response.json()["error"]
+    assert error["code"] == "customer_not_found"
+    assert error["details"]["account_id"] == "ACC-999"
+
+    assert snapshot()[0] == before
+    [action] = actions(client)
+    assert (action["status"], action["decision"], action["account_id"]) == ("rejected", "reject", None)
+    assert not [a for a in actions(client) if a["status"] == "executed"]
+
+
+@pytest.mark.parametrize("body", [
+    {"account_id": "ACC-102", "new_status": "Archived"},                      # no reason
+    {"account_id": "ACC-102", "new_status": 5, "reason": "x"},                 # wrong type
+    {"account_id": "ACC-102", "new_status": "Archived", "reason": ""},         # empty reason
+    {"account_id": "ACC-102", "new_status": "Archived", "reason": "x", "sql": "DROP"},  # extra key
+    {"account_id": "ACC-102", "new_status": "Archived", "reason": "x", "expected_version": "1"},
+    {"account_id": "ACC-102", "new_status": "Archived", "reason": "x", "run_id": 7},
+])
+def test_malformed_args_return_422_and_write_nothing(client, body):
+    before = snapshot()
+    response = client.post(UPDATE, json=body)
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_arguments"
+    assert snapshot() == before
+
+
+def test_non_object_body_returns_422_error_object(client):
+    before = snapshot()
+    response = client.post(UPDATE, json=["not", "an", "object"])
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert snapshot() == before
+
+
+def test_stale_expected_version_conflicts_and_writes_nothing(client):
+    before = snapshot()
+    response = archive(client, "ACC-102", expected_version=5)
+    assert response.status_code == 409
+    error = response.json()["error"]
+    assert error["code"] == "version_conflict"
+    assert error["details"] == {"expected_version": 5, "current_version": 1}
+    assert snapshot() == before
+
+
+def test_exception_mid_transaction_leaves_no_trace(client, monkeypatch):
+    before = snapshot()
+
+    def crash(*args, **kwargs):
+        raise RuntimeError("simulated crash after UPDATE, before ledger insert")
+
+    monkeypatch.setattr(gateway, "record_action", crash)
+    with pytest.raises(RuntimeError):
+        gateway.execute(
+            "update_customer_status",
+            {"account_id": "ACC-102", "new_status": "Archived", "reason": "x"},
+        )
+    assert snapshot() == before
+
+
+def test_update_verification_failure_rolls_back_write_but_logs(client, monkeypatch):
+    import verification
+    monkeypatch.setattr(verification, "verify_update", failed_check)
+
+    response = archive(client, "ACC-102")
+    assert response.status_code == 500
+    assert response.json()["status"] == "failed"
+    assert customer(client, "ACC-102")["status"] == "Active"
+    assert customer(client, "ACC-102")["version"] == 1
+    [action] = actions(client)
+    assert (action["status"], action["recovery_state"]) == ("failed", "unavailable")
+
+
+# --- undo (unchanged behaviour) -----------------------------------------------------------
+
+def failed_check(*args):
+    return {"status": "failed", "checks": {"forced": False}, "current_customer": None}
+
+
+def test_undo_restores_and_verifies(client):
+    action_id = archive(client, "ACC-102").json()["action_id"]
+    response = client.post(f"/api/actions/{action_id}/undo")
+    body = response.json()
+    assert response.status_code == 200
+    assert body["status"] == "verified"
+    assert all(body["checks"].values())
+    assert customer(client, "ACC-102")["status"] == "Active"
+    assert customer(client, "ACC-102")["version"] == 3
+
+    again = client.post(f"/api/actions/{action_id}/undo")
+    assert again.status_code == 409
+    assert again.json()["status"] == "refused"
+
+
+def test_undo_unknown_action_returns_error_object(client):
+    response = client.post("/api/actions/nope/undo")
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "action_not_found"
+
+
+def test_undo_refuses_to_overwrite_newer_edit(client):
+    action_id = archive(client, "ACC-102").json()["action_id"]
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE customers SET name = 'Edited', version = version + 1"
+            " WHERE account_id = 'ACC-102'"
+        )
+
+    response = client.post(f"/api/actions/{action_id}/undo")
+    assert response.status_code == 409
+    assert response.json()["status"] == "conflict_detected"
+    current = customer(client, "ACC-102")
+    assert (current["name"], current["status"], current["version"]) == ("Edited", "Archived", 3)
+
+
+def test_failed_restore_verification_rolls_back_restore(client, monkeypatch):
+    import verification
+    action_id = archive(client, "ACC-102").json()["action_id"]
+    monkeypatch.setattr(verification, "verify_restore", failed_check)
+
+    response = client.post(f"/api/actions/{action_id}/undo")
+    assert response.status_code == 500
+    assert response.json()["status"] == "failed"
+    assert customer(client, "ACC-102")["status"] == "Archived"
+    assert customer(client, "ACC-102")["version"] == 2
+    [action] = actions(client)
+    assert action["recovery_state"] == "verification_failed"
+    assert action["recovered_at"] is None

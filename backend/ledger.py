@@ -31,6 +31,7 @@ def action_dict(row):
         "recovered_at": row["recovered_at"],
         "actor": row["actor"],
         "decision": row["decision"],
+        "rule_id": row["rule_id"],
         "reason": row["reason"],
         "account_id": row["account_id"],
         "before_version": row["before_version"],
@@ -42,25 +43,25 @@ def action_dict(row):
 
 
 def record_action(
-    db, *, action_id, tool, args, before, after, risk, status,
-    recovery_state, verification, reason=None, run_id=None,
+    db, *, action_id, tool, args, before, after, decision, rule_id, risk,
+    status, recovery_state, verification, reason=None, run_id=None,
     actor="api", mode=None, scenario=None, undo_of_action_id=None,
 ):
     """Insert a ledger row using the caller's transaction."""
     db.execute(
         """
         INSERT INTO actions (
-            action_id, created_at, actor, tool, args_json, decision, reason,
-            risk, status, account_id, before_json, after_json,
+            action_id, created_at, actor, tool, args_json, decision, rule_id,
+            reason, risk, status, account_id, before_json, after_json,
             before_version, after_version, run_id, mode, scenario,
             undo_of_action_id, recovery_state, verification_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            action_id, now(), actor, tool, json.dumps(args),
-            "block" if status == "blocked" else "allow", reason,
-            risk, status, args.get("account_id"),
+            action_id, now(), actor, tool, json.dumps(args), decision, rule_id,
+            reason, risk, status,
+            before["account_id"] if before else None,
             _dumps(before), _dumps(after),
             before["version"] if before else None,
             after["version"] if after else None,
@@ -68,6 +69,15 @@ def record_action(
             recovery_state, _dumps(verification),
         ),
     )
+
+
+def count_executed_in_run(db, run_id):
+    if run_id is None:
+        return 0
+    return db.execute(
+        "SELECT COUNT(*) FROM actions WHERE run_id = ? AND status = 'executed'",
+        (run_id,),
+    ).fetchone()[0]
 
 
 def get_action(db, action_id):

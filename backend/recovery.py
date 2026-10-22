@@ -1,8 +1,8 @@
 """Conflict-aware Undo for customer status changes. Not a universal rollback."""
 import verification
 from db import get_customer, other_customers, transaction
-from gateway import error
 from ledger import get_action, now, set_recovery_state
+from schemas import error_body
 
 
 def undo(action_id):
@@ -14,7 +14,7 @@ def undo(action_id):
     with transaction() as db:
         action = get_action(db, action_id)
         if action is None:
-            return 404, error("Action not found")
+            return 404, error_body("action_not_found", "Action not found", {"action_id": action_id})
 
         if action["recovery_state"] != "available":
             return 409, {

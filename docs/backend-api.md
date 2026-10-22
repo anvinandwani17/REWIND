@@ -1,8 +1,22 @@
 # REWIND backend API
 
-Base URL when running locally: `http://127.0.0.1:8000` (`cd backend; uvicorn main:app --reload`).
+Base URL when running locally: `http://127.0.0.1:8000`.
+
+```powershell
+$env:REWIND_DEMO_MODE = "1"; Set-Location backend; uvicorn main:app --reload
+```
 
 Scope: Undo is supported for **customer status changes only**. This is not a universal rollback.
+
+## Configuration (env vars)
+
+| Var | Default | Effect |
+|---|---|---|
+| `REWIND_DB_PATH` | `backend/data/rewind.db` | SQLite file |
+| `REWIND_DEMO_MODE` | off | `1` enables `/api/demo/reset` and the fixed demo clock (2026-10-22T12:00:00Z) |
+| `REWIND_RECENT_ACTIVITY_DAYS` | `90` | `recent_activity` rule: archiving a customer active within N days is blocked |
+| `REWIND_BULK_APPROVAL_THRESHOLD` | `3` | After this many executed changes in one `run_id`, further changes need approval |
+| `REWIND_FAULT_DISABLE_RECENT_ACTIVITY` | off | Injected fault. `1` disables **only** `recent_activity`, and only in demo mode. Every action taken while it is on is labelled `scenario: "injected_fault"` |
 
 ## Shapes
 
@@ -11,53 +25,65 @@ Scope: Undo is supported for **customer status changes only**. This is not a uni
 {"account_id": "ACC-102", "name": "Meera Iyer", "status": "Active",
  "last_activity_at": "2025-03-10T12:00:00Z", "protected": false, "version": 1}
 ```
-`last_activity_at` is ISO-8601 UTC with a trailing `Z`.
+`status` is `Active` | `Archived`. `last_activity_at` is ISO-8601 UTC.
 
-**Verification** (deterministic code re-reading SQLite; never the LLM)
+**Error** (every error the backend produces, including 422)
 ```json
-{"status": "verified" | "failed",
- "checks": {"<check>": true, "...": true},
- "current_customer": Customer | null}
+{"error": {"code": "customer_not_found", "message": "Customer not found", "details": {...} | [...] | null}}
+```
+Codes: `invalid_arguments`, `invalid_request`, `unsupported_tool`, `customer_not_found`, `action_not_found`, `version_conflict`, `demo_mode_off`.
+
+**Verification** (deterministic code re-reading SQLite inside the write transaction; never the LLM)
+```json
+{"status": "verified" | "failed", "checks": {"<check>": true}, "current_customer": Customer | null}
 ```
 Update checks: `requested_status_applied`, `version_incremented`, `unrelated_records_unchanged`, `database_integrity_ok`.
 Undo checks: `original_status_restored`, `version_incremented`, `unrelated_records_unchanged`, `database_integrity_ok`.
 
-**Error** (any 4xx/5xx the backend produces itself)
+**ActionRecord** (one ledger row)
 ```json
-{"status": "error", "reason": "Customer not found"}
+{"id", "created_at", "actor", "tool_name", "arguments", "decision", "rule_id", "reason",
+ "risk", "status", "account_id", "before", "after", "before_version", "after_version",
+ "run_id", "mode", "scenario", "undo_of_action_id", "recovery_state", "verification",
+ "recovered_at"}
 ```
-Request-body validation errors are still FastAPI's default 422 `{"detail": [...]}`.
+- `actor`: `api` (direct HTTP call) | `agent`
+- `decision`: `allow` | `block` | `require_approval` | `reject`
+- `rule_id`: `default_allow`, `protected_customer`, `unknown_status`, `no_change`, `recent_activity`, `bulk_change`, `account_not_found`
+- `status`: `executed` | `blocked` | `pending_approval` | `rejected` | `failed`
+- `recovery_state`: `available` | `unavailable` | `conflict_detected` | `verified` | `verification_failed`
+- `risk`: `low` | `medium` | `high`
+- `mode`: `null` for direct calls; later `live` | `replay` (replay is never a live model run)
+- `scenario`: `null` or `injected_fault`
+- `account_id` is `null` on `rejected` rows for accounts that don't exist (the requested id is in `arguments`)
+- `undo_of_action_id`: reserved, `null` today
 
 ## Routes
 
 ### `GET /api/customers` → `Customer[]` ordered by `account_id`
 
-### `GET /api/actions` → ledger, newest first
-```json
-[{"id", "run_id", "tool_name", "arguments", "before", "after", "risk",
-  "status", "recovery_state", "verification", "created_at", "recovered_at",
-  "actor", "decision", "reason", "account_id", "before_version", "after_version",
-  "mode", "scenario", "undo_of_action_id"}]
-```
-- `actor`: `api` for direct calls (`agent` / `system` later)
-- `decision`: `allow` | `block`
-- `mode`: `null` for direct API calls, later `live` | `replay` (replay is never a live model run)
-- `scenario`: `null`, or `injected_fault` for demo fault runs
-- `undo_of_action_id`: reserved for later; `null` today
-- `status`: `executed` | `blocked` | `failed`
-- `recovery_state`: `available` | `unavailable` | `conflict_detected` | `verified` | `verification_failed`
-- `risk`: `low` | `medium` | `high`
+### `GET /api/actions` → `ActionRecord[]`, newest first
+
+### `GET /api/actions/{action_id}` → `ActionRecord` | 404 Error
 
 ### `POST /api/tools/update-customer-status`
-Request: `{"account_id": "ACC-102", "new_status": "Active" | "Archived", "run_id": "optional"}`
+Request:
+```json
+{"account_id": "ACC-102", "new_status": "Archived", "reason": "why (required, 1-500 chars)",
+ "expected_version": 1, "run_id": "optional"}
+```
+`expected_version` is optional; when sent and stale, nothing is written. Unknown keys are rejected.
 
-| Code | Body |
-|---|---|
-| 200 | `{action_id, status: "executed", risk, recovery_state: "available", before, after, verification}` |
-| 403 | `{action_id, status: "blocked", reason, before, after}` (protected customer) |
-| 409 | `{action_id, status: "blocked", reason, before, after}` (already has that status) |
-| 404 | Error |
-| 500 | `{action_id, status: "failed", risk, recovery_state: "unavailable", before, after, verification}`; the customer write was rolled back, the attempt is still logged |
+| Code | Body | Ledger |
+|---|---|---|
+| 200 | `{action_id, status: "executed", decision, rule_id, reason, risk, scenario, recovery_state: "available", before, after, verification}` | `executed` |
+| 202 | `{action_id, status: "pending_approval", decision: "require_approval", rule_id: "bulk_change", reason, risk, scenario, before, after}` (no change made; no approval UI yet) | `pending_approval` |
+| 403 | `{action_id, status: "blocked", decision: "block", rule_id, reason, risk, scenario, before, after}` | `blocked` |
+| 409 | same blocked body with `rule_id: "no_change"` | `blocked` |
+| 409 | Error `version_conflict`, `details: {expected_version, current_version}` | nothing |
+| 404 | Error `customer_not_found`, `details: {account_id, action_id}` | `rejected` |
+| 422 | Error `invalid_arguments` / `invalid_request`, `details`: validation errors | nothing |
+| 500 | `{..., status: "failed", recovery_state: "unavailable", verification}`; write rolled back | `failed` |
 
 ### `POST /api/actions/{action_id}/undo`
 
@@ -66,29 +92,32 @@ Request: `{"account_id": "ACC-102", "new_status": "Active" | "Archived", "run_id
 | 200 | `{action_id, ...Verification}` with `status: "verified"`; customer restored |
 | 409 | `{action_id, status: "conflict_detected", reason, expected_after, current_customer}`; a newer edit exists, nothing changed. Permanent for that action. |
 | 409 | `{action_id, status: "refused", reason}`; Undo not available in the current `recovery_state` |
-| 404 | Error |
-| 500 | `{action_id, ...Verification}` with `status: "failed"`; the restore was rolled back, customer unchanged |
+| 404 | Error `action_not_found` |
+| 500 | `{action_id, ...Verification}` with `status: "failed"`; the restore was rolled back |
 
 ### `POST /api/demo/reset`
-Only works when the backend runs with `REWIND_DEMO_MODE=1`; otherwise 403 Error.
-Clears the ledger and reseeds the 8-customer fixture in one transaction. The only route that wipes data.
+Needs `REWIND_DEMO_MODE=1`, otherwise 403 Error `demo_mode_off`.
+Drops, recreates and reseeds both tables in one transaction (also upgrades an older local DB). The only route that wipes data.
 ```json
 {"status": "reset", "demo_now": "2026-10-22T12:00:00Z", "customers": Customer[],
  "summary": {"total": 8, "active": 7, "archived": 1, "protected": 2,
              "roles": {"ACC-101": "recently active", "...": "..."}},
  "ledger_entries": 0}
 ```
-Running it twice gives identical output.
 
-## Changes since the first uncommitted version (2026-10-22)
-- 404s and other backend errors now return `{status: "error", reason}` instead of `{detail}`.
-- Update 200 response gains a `verification` field (additive).
-- New `status: "failed"` / `recovery_state: "verification_failed"` values; a failed verification never leaves data changed.
-- New route `POST /api/demo/reset`.
+## Change log
 
-## Changes in Priority-0 item 1 (2026-10-22)
-- `last_activity_at` changed from a date (`2024-03-10`) to ISO-8601 UTC (`2024-03-10T12:00:00Z`).
-- Demo data is now 8 customers (ACC-101..108) instead of 3.
-- `/api/actions` items gain `actor`, `decision`, `reason`, `account_id`, `before_version`, `after_version`, `mode`, `scenario`, `undo_of_action_id` (additive).
-- `POST /api/demo/reset` returns 403 unless `REWIND_DEMO_MODE=1`, and its body gains `demo_now`, `summary`, `ledger_entries`.
-- Default database moved to `backend/data/rewind.db`.
+### Priority-0 item 2 (2026-10-22)
+- **Breaking:** error bodies are now `{error: {code, message, details}}` (was `{status: "error", reason}`), including 422s (was FastAPI's `{detail}`).
+- **Breaking:** update requests require `reason`; unknown keys are rejected.
+- Archiving a customer active within 90 days is now blocked (`rule_id: "recent_activity"`). In the demo fixture that is ACC-101 and ACC-104.
+- New 202 `pending_approval` outcome for bulk runs; new ledger statuses `rejected` and `pending_approval`.
+- Update responses gain `decision`, `rule_id`, `reason`, `scenario`. ActionRecord gains `rule_id`.
+- New route `GET /api/actions/{action_id}`.
+- A local DB from before this change must be reset once (`POST /api/demo/reset`) or deleted.
+
+### Priority-0 item 1
+- `last_activity_at` changed from a date to ISO-8601 UTC; demo data is 8 customers; reset needs demo mode; default DB at `backend/data/rewind.db`.
+
+### First refactor
+- Update 200 gained `verification`; `failed` / `verification_failed` added; `POST /api/demo/reset` added.

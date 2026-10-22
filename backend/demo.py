@@ -41,6 +41,11 @@ def demo_mode_enabled():
     return os.environ.get("REWIND_DEMO_MODE") == "1"
 
 
+def clock():
+    """Fixed demo clock in demo mode so policy results are reproducible."""
+    return DEMO_NOW if demo_mode_enabled() else datetime.now(timezone.utc)
+
+
 def seed_if_empty():
     """First-run convenience: fill an empty database. Never touches existing rows."""
     with db.transaction() as conn:
@@ -49,11 +54,15 @@ def seed_if_empty():
 
 
 def reset():
-    """Wipe ledger and customers and reseed the fixture, in one transaction."""
-    db.init_schema()
+    """Drop, recreate and reseed both tables in one transaction.
+
+    Recreating (not just deleting) also upgrades a database made with an
+    older schema.
+    """
     with db.transaction() as conn:
-        conn.execute("DELETE FROM actions")
-        conn.execute("DELETE FROM customers")
+        conn.execute("DROP TABLE IF EXISTS actions")
+        conn.execute("DROP TABLE IF EXISTS customers")
+        db.create_tables(conn)
         db.insert_customers(conn, CUSTOMERS)
         customers = db.list_customers(conn)
 

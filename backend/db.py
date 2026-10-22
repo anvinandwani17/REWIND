@@ -3,13 +3,17 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
+from schemas import CustomerStatus
+
 DEFAULT_DB_PATH = Path(__file__).parent / "data" / "rewind.db"
 
-SCHEMA = """
+_STATUSES = ", ".join(f"'{status.value}'" for status in CustomerStatus)
+
+SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS customers (
     account_id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('Active', 'Archived')),
+    status TEXT NOT NULL CHECK (status IN ({_STATUSES})),
     last_activity_at TEXT NOT NULL,              -- ISO-8601 UTC, e.g. 2026-10-15T12:00:00Z
     protected INTEGER NOT NULL DEFAULT 0 CHECK (protected IN (0, 1)),
     version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1)
@@ -21,11 +25,15 @@ CREATE TABLE IF NOT EXISTS actions (
     actor TEXT NOT NULL,                         -- api | agent | system
     tool TEXT NOT NULL,
     args_json TEXT NOT NULL,
-    decision TEXT NOT NULL CHECK (decision IN ('allow', 'block')),
+    decision TEXT NOT NULL
+        CHECK (decision IN ('allow', 'block', 'require_approval', 'reject')),
+    rule_id TEXT,
     reason TEXT,
     risk TEXT NOT NULL CHECK (risk IN ('low', 'medium', 'high')),
-    status TEXT NOT NULL CHECK (status IN ('executed', 'blocked', 'failed')),
-    account_id TEXT REFERENCES customers(account_id),
+    status TEXT NOT NULL CHECK (
+        status IN ('executed', 'blocked', 'rejected', 'pending_approval', 'failed')
+    ),
+    account_id TEXT REFERENCES customers(account_id),  -- NULL when the account does not exist
     before_json TEXT,
     after_json TEXT,
     before_version INTEGER,
@@ -74,10 +82,17 @@ def transaction():
         db.execute("COMMIT")
 
 
+def create_tables(db):
+    # Statement by statement: executescript() would commit the caller's transaction.
+    for statement in SCHEMA.split(";"):
+        if statement.strip():
+            db.execute(statement)
+
+
 def init_schema():
     """Idempotent: creates missing tables, never drops or deletes anything."""
-    with connect() as db:
-        db.executescript(SCHEMA)
+    with transaction() as db:
+        create_tables(db)
 
 
 def customer_dict(row):
