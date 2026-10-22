@@ -1,4 +1,4 @@
-"""The ONLY entry point for supported mutations."""
+"""The ONLY entry point for supported mutations (including approved ones)."""
 import json
 from uuid import uuid4
 
@@ -6,20 +6,38 @@ from pydantic import ValidationError
 
 import demo
 import policies
+import privacy
 import verification
-from db import get_customer, transaction
-from ledger import count_executed_in_run, record_action
+from db import get_customer, list_customers, transaction
+from ledger import (
+    count_executed_in_run, deny_pending, get_action, now, record_action, resolve_pending,
+)
 from schemas import UpdateCustomerStatusArgs, envelope, error_body, error_obj
 
 SUPPORTED_TOOLS = {"update_customer_status": UpdateCustomerStatusArgs}
 
 
-def execute(tool_name, arguments, run_id=None, actor="api"):
+def _not_pending(action_id, action):
+    if action is None:
+        return 404, error_body("action_not_found", "Action not found", {"action_id": action_id})
+    return 409, error_body(
+        "not_pending", "Only pending_approval actions can be approved or rejected",
+        {"action_id": action_id, "status": action["status"]},
+    )
+
+
+def execute(tool_name, arguments, run_id=None, actor="api", approves=None, approval_note=None):
     """validate -> BEGIN IMMEDIATE -> before-state -> policy -> version check
     -> UPDATE version+1 -> pre-commit guard on after-state -> ledger row -> COMMIT.
 
     The policy runs inside the lock because it needs the before-state; checking
     it outside would let the customer change between check and write.
+
+    approves: id of a pending_approval action. Its recorded arguments go through
+    every step again; the approval satisfies only a require_approval decision
+    (never a block), the customer must be exactly as it was when approval was
+    requested, and the pending row itself is resolved instead of adding a row.
+
     Returns (http_status, {data, error}). Non-2xx always carries an error;
     outcomes that were recorded (blocked, failed) also carry their data.
     """
@@ -38,15 +56,32 @@ def execute(tool_name, arguments, run_id=None, actor="api"):
         )
 
     settings = policies.settings()
-    action_id = str(uuid4())
-    common = {
-        "action_id": action_id, "run_id": run_id, "tool": tool_name,
-        "args": args.model_dump(), "actor": actor,
-        "scenario": "injected_fault" if settings["recent_activity_disabled"] else None,
-    }
+    action_id = approves or str(uuid4())
 
     with transaction() as db:
+        names = [c["name"] for c in list_customers(db)]
+        common = {
+            "action_id": action_id, "run_id": run_id, "tool": tool_name,
+            # Free-text args (reason) are stored with customer names/phones masked.
+            "args": privacy.mask_args(args.model_dump(), names), "actor": actor,
+            "scenario": "injected_fault" if settings["recent_activity_disabled"] else None,
+        }
+
+        pending = None
+        if approves is not None:
+            pending = get_action(db, approves)
+            if pending is None or pending["status"] != "pending_approval":
+                return _not_pending(approves, pending)
+
         before = get_customer(db, args.account_id)
+        if pending is not None and before != pending["before"]:
+            # Nothing written; the request stays pending so an approver can reject it.
+            return 409, error_body(
+                "approval_stale",
+                "Customer changed since approval was requested; reject and re-request",
+                {"requested_before": pending["before"], "current_customer": before},
+            )
+
         if before is None:
             message = "Customer not found"
             record_action(
@@ -65,6 +100,9 @@ def execute(tool_name, arguments, run_id=None, actor="api"):
             run_executed_count=count_executed_in_run(db, run_id),
             settings=settings,
         )
+        if pending is not None and decision["decision"] == "require_approval":
+            decision = {**decision, "decision": "allow",
+                        "reason": f"Approved by {actor}: {decision['reason']}"}
         outcome = {
             "action_id": action_id,
             "decision": decision["decision"],
@@ -76,8 +114,12 @@ def execute(tool_name, arguments, run_id=None, actor="api"):
         }
 
         if decision["decision"] != "allow":
-            pending = decision["decision"] == "require_approval"
-            status = "pending_approval" if pending else "blocked"
+            if pending is not None:
+                # An approval never overrides a block; the request stays pending.
+                return 409, error_body("policy_blocked", decision["reason"],
+                                       {"rule_id": decision["rule_id"]})
+            awaiting = decision["decision"] == "require_approval"
+            status = "pending_approval" if awaiting else "blocked"
             record_action(
                 db, **common, before=before, after=before,
                 decision=decision["decision"], rule_id=decision["rule_id"],
@@ -85,7 +127,7 @@ def execute(tool_name, arguments, run_id=None, actor="api"):
                 recovery_state="unavailable", verification=None,
             )
             data = {**outcome, "status": status, "after": before}
-            if pending:
+            if awaiting:
                 return 202, envelope(data)
             http_status = 409 if decision["rule_id"] == "no_change" else 403
             return http_status, envelope(data, error_obj(
@@ -124,12 +166,20 @@ def execute(tool_name, arguments, run_id=None, actor="api"):
             ("executed", "available") if executed else ("failed", "unavailable")
         )
         reason = decision["reason"] if executed else "Pre-commit guard failed; write rolled back"
-        record_action(
-            db, **common, before=before, after=after,
-            decision=decision["decision"], rule_id=decision["rule_id"],
-            reason=reason, risk=decision["risk"], status=status,
-            recovery_state=recovery_state, verification=result,
-        )
+        if pending is not None:
+            resolve_pending(
+                db, approves, status=status, after=after, recovery_state=recovery_state,
+                verification=result, reason=reason,
+                approval={"decision": "approved", "role": actor, "at": now(),
+                          "note": privacy.mask_text(approval_note, names) if approval_note else None},
+            )
+        else:
+            record_action(
+                db, **common, before=before, after=after,
+                decision=decision["decision"], rule_id=decision["rule_id"],
+                reason=reason, risk=decision["risk"], status=status,
+                recovery_state=recovery_state, verification=result,
+            )
 
     data = {
         **outcome,
@@ -142,3 +192,17 @@ def execute(tool_name, arguments, run_id=None, actor="api"):
     if executed:
         return 200, envelope(data)
     return 500, envelope(data, error_obj("write_not_verified", reason))
+
+
+def reject(action_id, actor, note=None):
+    """Resolve a pending_approval action as denied. No customer change."""
+    with transaction() as db:
+        pending = get_action(db, action_id)
+        if pending is None or pending["status"] != "pending_approval":
+            return _not_pending(action_id, pending)
+        names = [c["name"] for c in list_customers(db)]
+        deny_pending(db, action_id, {
+            "decision": "rejected", "role": actor, "at": now(),
+            "note": privacy.mask_text(note, names) if note else None,
+        })
+    return 200, envelope({"action_id": action_id, "status": "denied"})

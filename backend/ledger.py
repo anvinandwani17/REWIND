@@ -29,6 +29,7 @@ def action_dict(row):
         "verification": _loads(row["verification_json"]),
         "evidence": _loads(row["evidence_json"]),
         "recovery_verification": _loads(row["recovery_verification_json"]),
+        "approval": _loads(row["approval_json"]),
         "created_at": row["created_at"],
         "recovered_at": row["recovered_at"],
         "actor": row["actor"],
@@ -71,6 +72,32 @@ def record_action(
             recovery_state, _dumps(verification), _dumps(evidence),
         ),
     )
+
+
+def resolve_pending(db, action_id, *, status, after, recovery_state, verification, reason, approval):
+    """Approve: the pending row itself becomes the executed (or failed) action."""
+    cursor = db.execute(
+        """
+        UPDATE actions
+        SET status = ?, after_json = ?, after_version = ?, recovery_state = ?,
+            verification_json = ?, reason = ?, approval_json = ?
+        WHERE action_id = ? AND status = 'pending_approval'
+        """,
+        (status, _dumps(after), after["version"] if after else None, recovery_state,
+         _dumps(verification), reason, _dumps(approval), action_id),
+    )
+    if cursor.rowcount != 1:
+        raise RuntimeError(f"Action {action_id} was not pending approval")
+
+
+def deny_pending(db, action_id, approval):
+    cursor = db.execute(
+        "UPDATE actions SET status = 'denied', approval_json = ?"
+        " WHERE action_id = ? AND status = 'pending_approval'",
+        (_dumps(approval), action_id),
+    )
+    if cursor.rowcount != 1:
+        raise RuntimeError(f"Action {action_id} was not pending approval")
 
 
 def store_undo_verification(db, undo_action_id, original_action_id, result):

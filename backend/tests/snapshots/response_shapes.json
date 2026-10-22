@@ -8,11 +8,13 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
         },
         "after_version": "int",
+        "approval": "null",
         "arguments": {
           "account_id": "str",
           "expected_version": "int",
@@ -23,6 +25,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -74,11 +77,13 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
         },
         "after_version": "int",
+        "approval": "null",
         "arguments": {
           "account_id": "str",
           "expected_version": "null",
@@ -89,6 +94,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -141,11 +147,18 @@
             "account_id": "str",
             "last_activity_at": "str",
             "name": "str",
+            "phone": "str",
             "protected": "bool",
             "status": "str",
             "version": "int"
           },
           "after_version": "int",
+          "approval": {
+            "at": "str",
+            "decision": "str",
+            "note": "str",
+            "role": "str"
+          },
           "arguments": {
             "account_id": "str",
             "expected_version": "null",
@@ -156,6 +169,7 @@
             "account_id": "str",
             "last_activity_at": "str",
             "name": "str",
+            "phone": "str",
             "protected": "bool",
             "status": "str",
             "version": "int"
@@ -197,6 +211,180 @@
     },
     "status": 501
   },
+  "approve_not_pending": {
+    "shape": {
+      "data": "null",
+      "error": {
+        "code": "str",
+        "details": {
+          "action_id": "str",
+          "status": "str"
+        },
+        "message": "str"
+      }
+    },
+    "status": 409
+  },
+  "approve_pending": {
+    "shape": {
+      "data": {
+        "account_id": "str",
+        "actor": "str",
+        "after": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "after_version": "int",
+        "approval": {
+          "at": "str",
+          "decision": "str",
+          "note": "str",
+          "role": "str"
+        },
+        "arguments": {
+          "account_id": "str",
+          "expected_version": "null",
+          "new_status": "str",
+          "reason": "str"
+        },
+        "before": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "before_version": "int",
+        "created_at": "str",
+        "decision": "str",
+        "evidence": "null",
+        "id": "str",
+        "mode": "null",
+        "reason": "str",
+        "recovered_at": "null",
+        "recovery_state": "str",
+        "recovery_verification": "null",
+        "risk": "str",
+        "rule_id": "str",
+        "run_id": "str",
+        "scenario": "null",
+        "status": "str",
+        "tool_name": "str",
+        "undo_available": "bool",
+        "undo_disabled_reason": "null",
+        "undo_of_action_id": "null",
+        "verification": {
+          "checks": [
+            {
+              "actual": "int",
+              "description": "str",
+              "expected": "int",
+              "id": "str",
+              "passed": "bool"
+            }
+          ],
+          "scope": "str",
+          "stage": "str",
+          "verdict": "str"
+        }
+      },
+      "error": "null"
+    },
+    "status": 200
+  },
+  "audit_export": {
+    "shape": {
+      "data": {
+        "action_count": "int",
+        "actions": [
+          {
+            "account_id": "str",
+            "actor": "str",
+            "after": {
+              "account_id": "str",
+              "last_activity_at": "str",
+              "name": "str",
+              "phone": "str",
+              "protected": "bool",
+              "status": "str",
+              "version": "int"
+            },
+            "after_version": "int",
+            "approval": {
+              "at": "str",
+              "decision": "str",
+              "note": "str",
+              "role": "str"
+            },
+            "arguments": {
+              "account_id": "str",
+              "expected_version": "null",
+              "new_status": "str",
+              "reason": "str"
+            },
+            "before": {
+              "account_id": "str",
+              "last_activity_at": "str",
+              "name": "str",
+              "phone": "str",
+              "protected": "bool",
+              "status": "str",
+              "version": "int"
+            },
+            "before_version": "int",
+            "created_at": "str",
+            "decision": "str",
+            "evidence": "null",
+            "id": "str",
+            "mode": "null",
+            "reason": "str",
+            "recovered_at": "null",
+            "recovery_state": "str",
+            "recovery_verification": "null",
+            "risk": "str",
+            "rule_id": "str",
+            "run_id": "str",
+            "scenario": "null",
+            "status": "str",
+            "tool_name": "str",
+            "undo_available": "bool",
+            "undo_disabled_reason": "str",
+            "undo_of_action_id": "null",
+            "verification": "null"
+          }
+        ],
+        "exported_at": "str",
+        "exported_by_role": "str",
+        "integrity_check": "str",
+        "pii_masked": "bool"
+      },
+      "error": "null"
+    },
+    "status": 200
+  },
+  "audit_export_forbidden": {
+    "shape": {
+      "data": "null",
+      "error": {
+        "code": "str",
+        "details": {
+          "required": [
+            "str"
+          ],
+          "role": "str"
+        },
+        "message": "str"
+      }
+    },
+    "status": 403
+  },
   "customers": {
     "shape": {
       "data": [
@@ -204,11 +392,73 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
         }
       ],
+      "error": "null"
+    },
+    "status": 200
+  },
+  "reject_pending": {
+    "shape": {
+      "data": {
+        "account_id": "str",
+        "actor": "str",
+        "after": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "after_version": "int",
+        "approval": {
+          "at": "str",
+          "decision": "str",
+          "note": "str",
+          "role": "str"
+        },
+        "arguments": {
+          "account_id": "str",
+          "expected_version": "null",
+          "new_status": "str",
+          "reason": "str"
+        },
+        "before": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "before_version": "int",
+        "created_at": "str",
+        "decision": "str",
+        "evidence": "null",
+        "id": "str",
+        "mode": "null",
+        "reason": "str",
+        "recovered_at": "null",
+        "recovery_state": "str",
+        "recovery_verification": "null",
+        "risk": "str",
+        "rule_id": "str",
+        "run_id": "str",
+        "scenario": "null",
+        "status": "str",
+        "tool_name": "str",
+        "undo_available": "bool",
+        "undo_disabled_reason": "str",
+        "undo_of_action_id": "null",
+        "verification": "null"
+      },
       "error": "null"
     },
     "status": 200
@@ -221,6 +471,7 @@
             "account_id": "str",
             "last_activity_at": "str",
             "name": "str",
+            "phone": "str",
             "protected": "bool",
             "status": "str",
             "version": "int"
@@ -291,6 +542,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -309,6 +561,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -391,6 +644,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -400,6 +654,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -433,6 +688,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -442,6 +698,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -475,6 +732,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -483,6 +741,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -512,6 +771,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -520,6 +780,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -549,6 +810,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -557,6 +819,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -595,6 +858,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -603,6 +867,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -664,6 +929,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -672,6 +938,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -710,6 +977,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -718,6 +986,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -761,6 +1030,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -769,6 +1039,7 @@
           "account_id": "str",
           "last_activity_at": "str",
           "name": "str",
+          "phone": "str",
           "protected": "bool",
           "status": "str",
           "version": "int"
@@ -783,6 +1054,70 @@
       "error": "null"
     },
     "status": 202
+  },
+  "update_pending_approval_2": {
+    "shape": {
+      "data": {
+        "action_id": "str",
+        "after": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "before": {
+          "account_id": "str",
+          "last_activity_at": "str",
+          "name": "str",
+          "phone": "str",
+          "protected": "bool",
+          "status": "str",
+          "version": "int"
+        },
+        "decision": "str",
+        "reason": "str",
+        "risk": "str",
+        "rule_id": "str",
+        "scenario": "null",
+        "status": "str"
+      },
+      "error": "null"
+    },
+    "status": 202
+  },
+  "update_role_forbidden": {
+    "shape": {
+      "data": "null",
+      "error": {
+        "code": "str",
+        "details": {
+          "required": [
+            "str"
+          ],
+          "role": "str"
+        },
+        "message": "str"
+      }
+    },
+    "status": 403
+  },
+  "update_role_missing": {
+    "shape": {
+      "data": "null",
+      "error": {
+        "code": "str",
+        "details": {
+          "roles": [
+            "str"
+          ]
+        },
+        "message": "str"
+      }
+    },
+    "status": 401
   },
   "update_version_conflict": {
     "shape": {

@@ -82,6 +82,14 @@ def test_documented_status_codes(examples):
         "undo_not_undoable": (409, "not_undoable"),
         "undo_not_found": (404, "action_not_found"),
         "update_pending_approval": (202, None),
+        "approve_pending": (200, None),
+        "approve_not_pending": (409, "not_pending"),
+        "update_pending_approval_2": (202, None),
+        "reject_pending": (200, None),
+        "update_role_missing": (401, "role_required"),
+        "update_role_forbidden": (403, "role_forbidden"),
+        "audit_export": (200, None),
+        "audit_export_forbidden": (403, "role_forbidden"),
         "actions": (200, None),
         "agent_runs_reserved": (501, "not_implemented"),
         "run_evidence_reserved": (501, "not_implemented"),
@@ -110,11 +118,13 @@ def test_undo_fields_follow_current_state(examples):
 def test_cors_allows_only_the_frontend_origin(tmp_path, monkeypatch):
     monkeypatch.setenv("REWIND_DB_PATH", str(tmp_path / "cors.db"))
     preflight = {"Access-Control-Request-Method": "POST",
-                 "Access-Control-Request-Headers": "content-type"}
+                 "Access-Control-Request-Headers": "content-type, x-role, x-role-key"}
     with TestClient(main.app) as client:
         allowed = client.options("/api/customers",
                                  headers={"Origin": main.FRONTEND_ORIGIN, **preflight})
+        assert allowed.status_code == 200
         assert allowed.headers.get("access-control-allow-origin") == main.FRONTEND_ORIGIN
+        assert "x-role-key" in allowed.headers.get("access-control-allow-headers", "").lower()
 
         other = client.get("/api/customers", headers={"Origin": "http://evil.example"})
         assert "access-control-allow-origin" not in other.headers

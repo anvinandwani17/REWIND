@@ -11,6 +11,7 @@ import main
 import tools
 
 UPDATE = "/api/tools/update-customer-status"
+OPERATOR = {"X-Role": "operator", "X-Role-Key": "demo-operator-key"}
 
 
 @pytest.fixture
@@ -20,7 +21,7 @@ def client(tmp_path, monkeypatch):
     for name in ("REWIND_RECENT_ACTIVITY_DAYS", "REWIND_BULK_APPROVAL_THRESHOLD",
                  "REWIND_FAULT_DISABLE_RECENT_ACTIVITY"):
         monkeypatch.delenv(name, raising=False)
-    with TestClient(main.app) as c:
+    with TestClient(main.app, headers=OPERATOR) as c:
         yield c
 
 
@@ -79,7 +80,7 @@ def test_schema_init_is_idempotent_and_preserves_rows(client):
 def test_customers_shape_and_fixture_roles(client):
     customers = client.get("/api/customers").json()["data"]
     assert set(customers[0]) == {
-        "account_id", "name", "status", "last_activity_at", "protected", "version",
+        "account_id", "name", "phone", "status", "last_activity_at", "protected", "version",
     }
     by_id = {c["account_id"]: c for c in customers}
     assert by_id["ACC-101"]["last_activity_at"] == "2026-10-15T12:00:00Z"

@@ -39,6 +39,10 @@ class UpdateCustomerStatusArgs(ToolArgs):
     expected_version: StrictInt | None = Field(default=None, ge=1)
 
 
+class ApprovalRequest(ToolArgs):
+    note: StrictStr | None = Field(default=None, max_length=500)
+
+
 class ErrorDetail(BaseModel):
     code: str
     message: str
@@ -89,6 +93,7 @@ class ActionRecord(BaseModel):
     verification: dict[str, Any] | None
     evidence: dict[str, Any] | None
     recovery_verification: dict[str, Any] | None
+    approval: dict[str, Any] | None
     recovered_at: str | None
     # Derived at read time from the same rules recovery.undo() uses.
     undo_available: bool

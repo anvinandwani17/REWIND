@@ -28,6 +28,8 @@ CUSTOMERS = [
     {
         "account_id": account_id,
         "name": name,
+        # Obviously synthetic: +91 90000 00<account number>.
+        "phone": f"+91 90000 00{account_id[-3:]}",
         "status": status,
         "last_activity_at": _days_ago(days),
         "protected": protected,

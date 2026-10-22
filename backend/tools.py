@@ -1,21 +1,26 @@
-"""Tools the agent may call: bounded reads, plus one write that goes through the gateway."""
+"""Tools the agent may call: bounded reads, plus one write that goes through the gateway.
+
+Everything returned here is agent context, so customer names and phones are masked.
+The FinCore UI reads unmasked customers from db directly (main.py), not from here.
+"""
 import db
 import demo
 import gateway
 import policies
+import privacy
 from schemas import GetCustomerArgs, InactivityReportArgs, ListCustomersArgs
 
 
 def list_customers():
     ListCustomersArgs()
     with db.connect() as conn:
-        return db.list_customers(conn)
+        return privacy.mask_pii(db.list_customers(conn))
 
 
 def get_customer(account_id):
     args = GetCustomerArgs(account_id=account_id)
     with db.connect() as conn:
-        return db.get_customer(conn, args.account_id)
+        return privacy.mask_pii(db.get_customer(conn, args.account_id))
 
 
 def get_inactivity_report(*, min_inactive_days, as_of=None):
@@ -30,7 +35,7 @@ def get_inactivity_report(*, min_inactive_days, as_of=None):
         "customers": [
             {
                 "account_id": c["account_id"],
-                "name": c["name"],
+                "name": privacy.mask_name(c["name"]),
                 "status": c["status"],
                 "protected": c["protected"],
                 "last_activity_at": c["last_activity_at"],
@@ -47,4 +52,5 @@ def update_customer_status(account_id, new_status, reason, expected_version=None
     args = {"account_id": account_id, "new_status": new_status, "reason": reason}
     if expected_version is not None:
         args["expected_version"] = expected_version
-    return gateway.execute("update_customer_status", args, run_id=run_id, actor="agent")
+    status, body = gateway.execute("update_customer_status", args, run_id=run_id, actor="agent")
+    return status, privacy.mask_pii(body)

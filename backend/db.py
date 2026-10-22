@@ -12,7 +12,8 @@ _STATUSES = ", ".join(f"'{status.value}'" for status in CustomerStatus)
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS customers (
     account_id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
+    name TEXT NOT NULL,                          -- PII: masked for the agent and in audit exports
+    phone TEXT,                                  -- PII: masked for the agent and in audit exports
     status TEXT NOT NULL CHECK (status IN ({_STATUSES})),
     last_activity_at TEXT NOT NULL,              -- ISO-8601 UTC, e.g. 2026-10-15T12:00:00Z
     protected INTEGER NOT NULL DEFAULT 0 CHECK (protected IN (0, 1)),
@@ -22,7 +23,7 @@ CREATE TABLE IF NOT EXISTS customers (
 CREATE TABLE IF NOT EXISTS actions (
     action_id TEXT PRIMARY KEY,
     created_at TEXT NOT NULL,
-    actor TEXT NOT NULL,                         -- api | agent | ops_user | system
+    actor TEXT NOT NULL,                         -- operator | agent | ops_user | system
     tool TEXT NOT NULL,                          -- update_customer_status | undo
     args_json TEXT NOT NULL,
     decision TEXT NOT NULL
@@ -31,8 +32,8 @@ CREATE TABLE IF NOT EXISTS actions (
     reason TEXT,
     risk TEXT NOT NULL CHECK (risk IN ('low', 'medium', 'high')),
     status TEXT NOT NULL CHECK (
-        status IN ('executed', 'blocked', 'rejected', 'pending_approval', 'failed',
-                   'conflict_detected')
+        status IN ('executed', 'blocked', 'rejected', 'pending_approval', 'denied',
+                   'failed', 'conflict_detected')
     ),
     account_id TEXT REFERENCES customers(account_id),  -- NULL when the account does not exist
     before_json TEXT,
@@ -47,6 +48,7 @@ CREATE TABLE IF NOT EXISTS actions (
     verification_json TEXT,                      -- undo rows: post-commit verifier result
     evidence_json TEXT,                          -- undo rows: pre-restore snapshot, guard, conflict evidence
     recovery_verification_json TEXT,             -- originals: latest undo attempt's verifier result
+    approval_json TEXT,                          -- require_approval rows: decision, role, at, note
     recovered_at TEXT
 );
 
@@ -129,7 +131,7 @@ def other_customers(db, account_id):
 def insert_customers(db, customers):
     db.executemany(
         """INSERT INTO customers
-           (account_id, name, status, last_activity_at, protected, version)
-           VALUES (:account_id, :name, :status, :last_activity_at, :protected, 1)""",
+           (account_id, name, phone, status, last_activity_at, protected, version)
+           VALUES (:account_id, :name, :phone, :status, :last_activity_at, :protected, 1)""",
         customers,
     )

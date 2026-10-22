@@ -15,6 +15,10 @@ import ledger
 import recovery
 
 UPDATE = "/api/tools/update-customer-status"
+ROLE_HEADERS = {
+    role: {"X-Role": role, "X-Role-Key": f"demo-{role}-key"}
+    for role in ("operator", "approver", "auditor")
+}
 
 
 def make_deterministic(monkeypatch):
@@ -31,17 +35,23 @@ def make_deterministic(monkeypatch):
         monkeypatch.setattr(module, "uuid4", fake_uuid)
     monkeypatch.setattr(ledger, "now", fake_now)
     monkeypatch.setattr(recovery, "now", fake_now)
+    monkeypatch.setattr(gateway, "now", fake_now)
 
 
 def run_examples(client, monkeypatch):
     """Walk the demo story once; return [{id, title, method, path, body, status, response}]."""
     examples = []
 
-    def call(example_id, title, method, path, body=None):
-        response = client.request(method, path, json=body)
+    def call(example_id, title, method, path, body=None, role="default"):
+        # Reads need no role; writes default to operator. role=None sends no headers.
+        if role == "default":
+            role = None if method == "GET" else "operator"
+        headers = ROLE_HEADERS[role] if role else {}
+        response = client.request(method, path, json=body, headers=headers)
         examples.append({
             "id": example_id, "title": title, "method": method, "path": path,
-            "body": body, "status": response.status_code, "response": response.json(),
+            "headers": headers, "body": body, "status": response.status_code,
+            "response": response.json(),
         })
         return response.json()
 
@@ -84,10 +94,28 @@ def run_examples(client, monkeypatch):
     call("undo_not_found", "Undo an unknown action", "POST", "/api/actions/does-not-exist/undo")
 
     monkeypatch.setenv("REWIND_BULK_APPROVAL_THRESHOLD", "1")
-    client.post(UPDATE, json=update("ACC-108", "Archived", "Inactive for 150 days", run_id="run-bulk"))
-    call("update_pending_approval", "Bulk run over threshold (threshold set to 1)", "POST", UPDATE,
-         update("ACC-102", "Archived", "Inactive for 591 days", run_id="run-bulk"))
+    client.post(UPDATE, headers=ROLE_HEADERS["operator"],
+                json=update("ACC-108", "Archived", "Inactive for 150 days", run_id="run-bulk"))
+    pending = call("update_pending_approval", "Bulk run over threshold (threshold set to 1)", "POST", UPDATE,
+                   update("ACC-102", "Archived", "Inactive for 591 days", run_id="run-bulk"))
+    pending_id = pending["data"]["action_id"]
+    call("approve_pending", "Approve a pending action", "POST", f"/api/actions/{pending_id}/approve",
+         {"note": "Checked the account history"}, role="approver")
+    call("approve_not_pending", "Approve it again", "POST", f"/api/actions/{pending_id}/approve",
+         role="approver")
+    second_pending = call("update_pending_approval_2", "Another bulk change waits for approval", "POST",
+                          UPDATE, update("ACC-105", "Archived", "Inactive for 420 days", run_id="run-bulk"))
+    call("reject_pending", "Reject a pending action", "POST",
+         f"/api/actions/{second_pending['data']['action_id']}/reject", {"note": "Not this week"},
+         role="approver")
     monkeypatch.delenv("REWIND_BULK_APPROVAL_THRESHOLD")
+
+    call("update_role_missing", "No role headers", "POST", UPDATE,
+         update("ACC-105", "Archived", "Cleanup"), role=None)
+    call("update_role_forbidden", "Wrong role for the route", "POST", UPDATE,
+         update("ACC-105", "Archived", "Cleanup"), role="auditor")
+    call("audit_export", "Export the audit trail", "GET", "/api/audit/export", role="auditor")
+    call("audit_export_forbidden", "Export as an operator", "GET", "/api/audit/export", role="operator")
 
     call("actions", "List actions", "GET", "/api/actions")
     call("agent_runs_reserved", "Reserved: start an agent run", "POST", "/api/agent/runs")
@@ -117,6 +145,7 @@ def _json(value):
 
 def _example(ex, note=None):
     lines = [f"#### {ex['title']}", "", "```http", f"{ex['method']} {ex['path']}"]
+    lines += [f"{name}: {value}" for name, value in ex["headers"].items()]
     if ex["body"] is not None:
         lines += ["Content-Type: application/json", "", _json(ex["body"])]
     lines += ["```", "", f"Response `{ex['status']}`:", "", "```json", _json(ex["response"]), "```", ""]
@@ -162,6 +191,10 @@ def render(examples):
     actions = by_id["actions"]
     trimmed = {**actions, "response": {**actions["response"], "data": actions["response"]["data"][:1]}}
     count = len(actions["response"]["data"])
+    export = by_id["audit_export"]
+    export_data = export["response"]["data"]
+    trimmed_export = {**export, "response": {**export["response"],
+                      "data": {**export_data, "actions": export_data["actions"][:1]}}}
 
     sections = [
         "# REWIND backend API",
@@ -191,6 +224,46 @@ def render(examples):
         "- Some non-2xx responses still carry `data` (the recorded outcome): policy blocks, Undo "
         "conflicts, and unverified/failed writes. Show `error.message`, and use `data` for detail.",
         "- Show \"verified\" only when `verification.verdict == \"verified\"`.",
+        "",
+        "## Roles",
+        "",
+        "Send `X-Role` and `X-Role-Key` on every write. This is a demo role gate, **not** an "
+        "authentication system: keys are shared strings from `REWIND_ROLE_KEYS` "
+        "(`operator=...,approver=...,auditor=...`), defaulting to the public demo keys "
+        "`demo-operator-key`, `demo-approver-key`, `demo-auditor-key`.",
+        "",
+        "| Role | May call |",
+        "|---|---|",
+        "| (none) | `GET /api/customers`, `GET /api/actions`, `GET /api/actions/{action_id}` |",
+        "| `operator` | `POST /api/tools/update-customer-status`, `POST /api/actions/{action_id}/undo`, "
+        "`POST /api/demo/reset`, `POST /api/agent/runs` |",
+        "| `approver` | `POST /api/actions/{action_id}/approve`, `POST /api/actions/{action_id}/reject` |",
+        "| `auditor` | `GET /api/audit/export` |",
+        "",
+        "Each write route allows exactly one role. Missing/bad headers → 401 (`role_required`, "
+        "`invalid_role_key`); a valid role on the wrong route → 403 `role_forbidden`. Nothing is written "
+        "in either case.",
+        "",
+        "## Approvals",
+        "",
+        "- A change that needs approval (`rule_id: bulk_change`) returns 202 with "
+        "`status: \"pending_approval\"` and does **not** touch the customer.",
+        "- `approve` re-runs the recorded request through the gateway. It executes only if the customer "
+        "is exactly as it was when approval was requested (else 409 `approval_stale`) and no blocking "
+        "rule applies (an approval never overrides a block). The pending row itself becomes "
+        "`executed` with `approval: {decision, role, at, note}`, and is then undoable as usual.",
+        "- `reject` sets `status: \"denied\"`; the customer is unchanged.",
+        "- A request is resolved once; later approve/reject calls → 409 `not_pending`.",
+        "",
+        "## PII",
+        "",
+        "- Customers have `name` and `phone` (synthetic). `GET /api/customers` is the FinCore UI and is "
+        "unmasked.",
+        "- Masked: everything the agent reads through its tools, free-text ledger args "
+        "(`arguments.reason`) and approval notes, and the whole audit export "
+        "(`name` → `M*** I***`, phone → only the last 2 digits).",
+        "- `before`/`after` snapshots in `GET /api/actions` keep the full row, because Undo and the "
+        "verifier compare exact rows.",
         "",
         "## Refresh advice",
         "",
@@ -246,6 +319,23 @@ def render(examples):
         _example(by_id["update_version_conflict"]),
         _example(by_id["update_not_found"]),
         _example(by_id["update_malformed"]),
+        "### `POST /api/actions/{action_id}/approve` and `/reject` (approver)",
+        "",
+        "Optional body `{\"note\": \"...\"}` (≤500 chars, masked like ledger args). Returns the updated "
+        "ActionRecord.",
+        "",
+        _example(by_id["approve_pending"]),
+        _example(by_id["approve_not_pending"]),
+        _example(by_id["reject_pending"], "Setup: `update_pending_approval_2` put ACC-105 in `pending_approval`."),
+        "### `GET /api/audit/export` (auditor)",
+        "",
+        _example(trimmed_export, f"The real export had {export_data['action_count']} actions; only the "
+                                 "first is shown."),
+        _example(by_id["audit_export_forbidden"]),
+        "### Role errors",
+        "",
+        _example(by_id["update_role_missing"]),
+        _example(by_id["update_role_forbidden"]),
         "### `GET /api/actions`",
         "",
         _example(trimmed, f"The real response had {count} items; only the first (newest) is shown."),
@@ -268,16 +358,16 @@ def render(examples):
         "### Any unknown route",
         "",
         _example(by_id["route_not_found"]),
-        "## Changes since the last version (Priority-0 item 4)",
+        "## Changes since the last version (Priority-0 item 5)",
         "",
-        "- **Breaking:** every response is wrapped in `{data, error}`. `GET /api/customers` and "
-        "`GET /api/actions` now return their arrays under `data`.",
-        "- **Breaking:** errors are `{data: null, error: {...}}` (was `{error: {...}}`). Policy blocks "
-        "(`policy_blocked`), Undo conflicts (`undo_conflict`), and unverified writes now also set `error`.",
-        "- New on every action: `undo_available`, `undo_disabled_reason`.",
-        "- New: `POST /api/agent/runs` and `GET /api/runs/{run_id}/evidence` reserved (501).",
-        "- Unknown routes and 405s use the envelope (`route_not_found`, `method_not_allowed`).",
-        "- CORS enabled for `FRONTEND_ORIGIN` only.",
+        "- **Breaking:** every write needs `X-Role` + `X-Role-Key` (see Roles). Reads are unchanged.",
+        "- **Breaking:** `actor` on ledger rows is now the role (`operator`, `approver`) instead of `api`.",
+        "- New: `POST /api/actions/{action_id}/approve`, `POST /api/actions/{action_id}/reject`, "
+        "`GET /api/audit/export`.",
+        "- New ledger status `denied`; ActionRecord gains `approval`.",
+        "- Customers gain `phone` (synthetic). Ledger `arguments.reason` is stored with names/phones masked.",
+        "- CORS also allows the `X-Role` and `X-Role-Key` headers.",
+        "- Local DBs from before this change need one `POST /api/demo/reset` (as operator).",
         "",
     ]
     return "\n".join(sections)

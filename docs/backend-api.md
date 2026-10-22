@@ -22,6 +22,32 @@ Every response, success or error, is:
 - Some non-2xx responses still carry `data` (the recorded outcome): policy blocks, Undo conflicts, and unverified/failed writes. Show `error.message`, and use `data` for detail.
 - Show "verified" only when `verification.verdict == "verified"`.
 
+## Roles
+
+Send `X-Role` and `X-Role-Key` on every write. This is a demo role gate, **not** an authentication system: keys are shared strings from `REWIND_ROLE_KEYS` (`operator=...,approver=...,auditor=...`), defaulting to the public demo keys `demo-operator-key`, `demo-approver-key`, `demo-auditor-key`.
+
+| Role | May call |
+|---|---|
+| (none) | `GET /api/customers`, `GET /api/actions`, `GET /api/actions/{action_id}` |
+| `operator` | `POST /api/tools/update-customer-status`, `POST /api/actions/{action_id}/undo`, `POST /api/demo/reset`, `POST /api/agent/runs` |
+| `approver` | `POST /api/actions/{action_id}/approve`, `POST /api/actions/{action_id}/reject` |
+| `auditor` | `GET /api/audit/export` |
+
+Each write route allows exactly one role. Missing/bad headers → 401 (`role_required`, `invalid_role_key`); a valid role on the wrong route → 403 `role_forbidden`. Nothing is written in either case.
+
+## Approvals
+
+- A change that needs approval (`rule_id: bulk_change`) returns 202 with `status: "pending_approval"` and does **not** touch the customer.
+- `approve` re-runs the recorded request through the gateway. It executes only if the customer is exactly as it was when approval was requested (else 409 `approval_stale`) and no blocking rule applies (an approval never overrides a block). The pending row itself becomes `executed` with `approval: {decision, role, at, note}`, and is then undoable as usual.
+- `reject` sets `status: "denied"`; the customer is unchanged.
+- A request is resolved once; later approve/reject calls → 409 `not_pending`.
+
+## PII
+
+- Customers have `name` and `phone` (synthetic). `GET /api/customers` is the FinCore UI and is unmasked.
+- Masked: everything the agent reads through its tools, free-text ledger args (`arguments.reason`) and approval notes, and the whole audit export (`name` → `M*** I***`, phone → only the last 2 digits).
+- `before`/`after` snapshots in `GET /api/actions` keep the full row, because Undo and the verifier compare exact rows.
+
 ## Refresh advice
 
 - After **any** POST (update, Undo, reset), refetch `GET /api/customers` and `GET /api/actions`. Responses are not pushed; there is no websocket.
@@ -62,6 +88,14 @@ Every response, success or error, is:
 | `POST /api/actions/{action_id}/undo` | 409 | `not_undoable` | Undo a blocked action |
 | `POST /api/actions/{action_id}/undo` | 404 | `action_not_found` | Undo an unknown action |
 | `POST /api/tools/update-customer-status` | 202 | — | Bulk run over threshold (threshold set to 1) |
+| `POST /api/actions/{action_id}/approve` | 200 | — | Approve a pending action |
+| `POST /api/actions/{action_id}/approve` | 409 | `not_pending` | Approve it again |
+| `POST /api/tools/update-customer-status` | 202 | — | Another bulk change waits for approval |
+| `POST /api/actions/{action_id}/reject` | 200 | — | Reject a pending action |
+| `POST /api/tools/update-customer-status` | 401 | `role_required` | No role headers |
+| `POST /api/tools/update-customer-status` | 403 | `role_forbidden` | Wrong role for the route |
+| `GET /api/audit/export` | 200 | — | Export the audit trail |
+| `GET /api/audit/export` | 403 | `role_forbidden` | Export as an operator |
 | `GET /api/actions` | 200 | — | List actions |
 | `POST /api/agent/runs` | 501 | `not_implemented` | Reserved: start an agent run |
 | `GET /api/runs/run-1/evidence` | 501 | `not_implemented` | Reserved: run evidence |
@@ -89,6 +123,8 @@ IDs and timestamps are fixed for the docs; every other value is what the app ret
 
 ```http
 POST /api/demo/reset
+X-Role: operator
+X-Role-Key: demo-operator-key
 ```
 
 Response `200`:
@@ -102,6 +138,7 @@ Response `200`:
       {
         "account_id": "ACC-101",
         "name": "Aarav Sharma",
+        "phone": "+91 90000 00101",
         "status": "Active",
         "last_activity_at": "2026-10-15T12:00:00Z",
         "protected": false,
@@ -110,6 +147,7 @@ Response `200`:
       {
         "account_id": "ACC-102",
         "name": "Meera Iyer",
+        "phone": "+91 90000 00102",
         "status": "Active",
         "last_activity_at": "2025-03-10T12:00:00Z",
         "protected": false,
@@ -118,6 +156,7 @@ Response `200`:
       {
         "account_id": "ACC-103",
         "name": "Rohan Gupta",
+        "phone": "+91 90000 00103",
         "status": "Active",
         "last_activity_at": "2024-08-21T12:00:00Z",
         "protected": true,
@@ -126,6 +165,7 @@ Response `200`:
       {
         "account_id": "ACC-104",
         "name": "Priya Nair",
+        "phone": "+91 90000 00104",
         "status": "Active",
         "last_activity_at": "2026-09-22T12:00:00Z",
         "protected": false,
@@ -134,6 +174,7 @@ Response `200`:
       {
         "account_id": "ACC-105",
         "name": "Kabir Mehta",
+        "phone": "+91 90000 00105",
         "status": "Active",
         "last_activity_at": "2025-08-28T12:00:00Z",
         "protected": false,
@@ -142,6 +183,7 @@ Response `200`:
       {
         "account_id": "ACC-106",
         "name": "Ananya Rao",
+        "phone": "+91 90000 00106",
         "status": "Active",
         "last_activity_at": "2026-10-20T12:00:00Z",
         "protected": true,
@@ -150,6 +192,7 @@ Response `200`:
       {
         "account_id": "ACC-107",
         "name": "Vikram Singh",
+        "phone": "+91 90000 00107",
         "status": "Archived",
         "last_activity_at": "2024-01-26T12:00:00Z",
         "protected": false,
@@ -158,6 +201,7 @@ Response `200`:
       {
         "account_id": "ACC-108",
         "name": "Sara Thomas",
+        "phone": "+91 90000 00108",
         "status": "Active",
         "last_activity_at": "2026-05-25T12:00:00Z",
         "protected": false,
@@ -190,6 +234,8 @@ Response `200`:
 
 ```http
 POST /api/demo/reset
+X-Role: operator
+X-Role-Key: demo-operator-key
 ```
 
 Response `403`:
@@ -221,6 +267,7 @@ Response `200`:
     {
       "account_id": "ACC-101",
       "name": "Aarav Sharma",
+      "phone": "+91 90000 00101",
       "status": "Active",
       "last_activity_at": "2026-10-15T12:00:00Z",
       "protected": false,
@@ -229,6 +276,7 @@ Response `200`:
     {
       "account_id": "ACC-102",
       "name": "Meera Iyer",
+      "phone": "+91 90000 00102",
       "status": "Active",
       "last_activity_at": "2025-03-10T12:00:00Z",
       "protected": false,
@@ -237,6 +285,7 @@ Response `200`:
     {
       "account_id": "ACC-103",
       "name": "Rohan Gupta",
+      "phone": "+91 90000 00103",
       "status": "Active",
       "last_activity_at": "2024-08-21T12:00:00Z",
       "protected": true,
@@ -245,6 +294,7 @@ Response `200`:
     {
       "account_id": "ACC-104",
       "name": "Priya Nair",
+      "phone": "+91 90000 00104",
       "status": "Active",
       "last_activity_at": "2026-09-22T12:00:00Z",
       "protected": false,
@@ -253,6 +303,7 @@ Response `200`:
     {
       "account_id": "ACC-105",
       "name": "Kabir Mehta",
+      "phone": "+91 90000 00105",
       "status": "Active",
       "last_activity_at": "2025-08-28T12:00:00Z",
       "protected": false,
@@ -261,6 +312,7 @@ Response `200`:
     {
       "account_id": "ACC-106",
       "name": "Ananya Rao",
+      "phone": "+91 90000 00106",
       "status": "Active",
       "last_activity_at": "2026-10-20T12:00:00Z",
       "protected": true,
@@ -269,6 +321,7 @@ Response `200`:
     {
       "account_id": "ACC-107",
       "name": "Vikram Singh",
+      "phone": "+91 90000 00107",
       "status": "Archived",
       "last_activity_at": "2024-01-26T12:00:00Z",
       "protected": false,
@@ -277,6 +330,7 @@ Response `200`:
     {
       "account_id": "ACC-108",
       "name": "Sara Thomas",
+      "phone": "+91 90000 00108",
       "status": "Active",
       "last_activity_at": "2026-05-25T12:00:00Z",
       "protected": false,
@@ -295,6 +349,8 @@ Body: `account_id`, `new_status`, `reason` (required, 1–500 chars), optional `
 
 ```http
 POST /api/tools/update-customer-status
+X-Role: operator
+X-Role-Key: demo-operator-key
 Content-Type: application/json
 
 {
@@ -320,6 +376,7 @@ Response `200`:
     "before": {
       "account_id": "ACC-102",
       "name": "Meera Iyer",
+      "phone": "+91 90000 00102",
       "status": "Active",
       "last_activity_at": "2025-03-10T12:00:00Z",
       "protected": false,
@@ -330,6 +387,7 @@ Response `200`:
     "after": {
       "account_id": "ACC-102",
       "name": "Meera Iyer",
+      "phone": "+91 90000 00102",
       "status": "Archived",
       "last_activity_at": "2025-03-10T12:00:00Z",
       "protected": false,
@@ -366,11 +424,11 @@ Response `200`:
           "description": "Count and SHA-256 of all other rows in customers table, before vs after the UPDATE, inside the same transaction",
           "expected": {
             "row_count": 7,
-            "sha256": "ea60b90e07f72a4396e4987a46a5a5d8d361b9c69ba742bb661724c4876e6fbb"
+            "sha256": "9184d95c3ac112505ab19af7dd77fef0d809aa254b7f9d2636250ad1e01057f9"
           },
           "actual": {
             "row_count": 7,
-            "sha256": "ea60b90e07f72a4396e4987a46a5a5d8d361b9c69ba742bb661724c4876e6fbb"
+            "sha256": "9184d95c3ac112505ab19af7dd77fef0d809aa254b7f9d2636250ad1e01057f9"
           },
           "passed": true
         }
@@ -385,6 +443,8 @@ Response `200`:
 
 ```http
 POST /api/tools/update-customer-status
+X-Role: operator
+X-Role-Key: demo-operator-key
 Content-Type: application/json
 
 {
@@ -409,6 +469,7 @@ Response `403`:
     "before": {
       "account_id": "ACC-103",
       "name": "Rohan Gupta",
+      "phone": "+91 90000 00103",
       "status": "Active",
       "last_activity_at": "2024-08-21T12:00:00Z",
       "protected": true,
@@ -418,6 +479,7 @@ Response `403`:
     "after": {
       "account_id": "ACC-103",
       "name": "Rohan Gupta",
+      "phone": "+91 90000 00103",
       "status": "Active",
       "last_activity_at": "2024-08-21T12:00:00Z",
       "protected": true,
@@ -438,6 +500,8 @@ Response `403`:
 
 ```http
 POST /api/tools/update-customer-status
+X-Role: operator
+X-Role-Key: demo-operator-key
 Content-Type: application/json
 
 {
@@ -462,6 +526,7 @@ Response `403`:
     "before": {
       "account_id": "ACC-104",
       "name": "Priya Nair",
+      "phone": "+91 90000 00104",
       "status": "Active",
       "last_activity_at": "2026-09-22T12:00:00Z",
       "protected": false,
@@ -471,6 +536,7 @@ Response `403`:
     "after": {
       "account_id": "ACC-104",
       "name": "Priya Nair",
+      "phone": "+91 90000 00104",
       "status": "Active",
       "last_activity_at": "2026-09-22T12:00:00Z",
       "protected": false,
@@ -491,6 +557,8 @@ Response `403`:
 
 ```http
 POST /api/tools/update-customer-status
+X-Role: operator
+X-Role-Key: demo-operator-key
 Content-Type: application/json
 
 {
@@ -514,6 +582,7 @@ Response `409`:
     "before": {
       "account_id": "ACC-101",
       "name": "Aarav Sharma",
+      "phone": "+91 90000 00101",
       "status": "Active",
       "last_activity_at": "2026-10-15T12:00:00Z",
       "protected": false,
@@ -523,6 +592,7 @@ Response `409`:
     "after": {
       "account_id": "ACC-101",
       "name": "Aarav Sharma",
+      "phone": "+91 90000 00101",
       "status": "Active",
       "last_activity_at": "2026-10-15T12:00:00Z",
       "protected": false,
@@ -545,6 +615,8 @@ Setup: one change already executed in `run-bulk`, with `REWIND_BULK_APPROVAL_THR
 
 ```http
 POST /api/tools/update-customer-status
+X-Role: operator
+X-Role-Key: demo-operator-key
 Content-Type: application/json
 
 {
@@ -569,6 +641,7 @@ Response `202`:
     "before": {
       "account_id": "ACC-102",
       "name": "Meera Iyer",
+      "phone": "+91 90000 00102",
       "status": "Active",
       "last_activity_at": "2025-03-10T12:00:00Z",
       "protected": false,
@@ -578,6 +651,7 @@ Response `202`:
     "after": {
       "account_id": "ACC-102",
       "name": "Meera Iyer",
+      "phone": "+91 90000 00102",
       "status": "Active",
       "last_activity_at": "2025-03-10T12:00:00Z",
       "protected": false,
@@ -592,6 +666,8 @@ Response `202`:
 
 ```http
 POST /api/tools/update-customer-status
+X-Role: operator
+X-Role-Key: demo-operator-key
 Content-Type: application/json
 
 {
@@ -622,6 +698,8 @@ Response `409`:
 
 ```http
 POST /api/tools/update-customer-status
+X-Role: operator
+X-Role-Key: demo-operator-key
 Content-Type: application/json
 
 {
@@ -651,6 +729,8 @@ Response `404`:
 
 ```http
 POST /api/tools/update-customer-status
+X-Role: operator
+X-Role-Key: demo-operator-key
 Content-Type: application/json
 
 {
@@ -684,11 +764,410 @@ Response `422`:
 }
 ```
 
+### `POST /api/actions/{action_id}/approve` and `/reject` (approver)
+
+Optional body `{"note": "..."}` (≤500 chars, masked like ledger args). Returns the updated ActionRecord.
+
+#### Approve a pending action
+
+```http
+POST /api/actions/00000000-0000-4000-8000-000000000012/approve
+X-Role: approver
+X-Role-Key: demo-approver-key
+Content-Type: application/json
+
+{
+  "note": "Checked the account history"
+}
+```
+
+Response `200`:
+
+```json
+{
+  "data": {
+    "id": "00000000-0000-4000-8000-000000000012",
+    "created_at": "2026-10-22T12:00:12+00:00",
+    "actor": "operator",
+    "tool_name": "update_customer_status",
+    "arguments": {
+      "account_id": "ACC-102",
+      "new_status": "Archived",
+      "reason": "Inactive for 591 days",
+      "expected_version": null
+    },
+    "decision": "require_approval",
+    "rule_id": "bulk_change",
+    "reason": "Approved by approver: Run already executed 1 changes (threshold 1)",
+    "risk": "medium",
+    "status": "executed",
+    "account_id": "ACC-102",
+    "before": {
+      "account_id": "ACC-102",
+      "name": "Meera Iyer",
+      "phone": "+91 90000 00102",
+      "status": "Active",
+      "last_activity_at": "2025-03-10T12:00:00Z",
+      "protected": false,
+      "version": 3
+    },
+    "after": {
+      "account_id": "ACC-102",
+      "name": "Meera Iyer",
+      "phone": "+91 90000 00102",
+      "status": "Archived",
+      "last_activity_at": "2025-03-10T12:00:00Z",
+      "protected": false,
+      "version": 4
+    },
+    "before_version": 3,
+    "after_version": 4,
+    "run_id": "run-bulk",
+    "mode": null,
+    "scenario": null,
+    "undo_of_action_id": null,
+    "recovery_state": "available",
+    "verification": {
+      "verdict": "verified",
+      "stage": "pre_commit_guard",
+      "scope": "Pre-commit guard for the status update of customer ACC-102, inside the write transaction: UPDATE row count, the row's status and version as re-read in that transaction, and a hash of all other rows in customers table. Committed data is not re-read here.",
+      "checks": [
+        {
+          "id": "one_row_updated",
+          "description": "The status update UPDATE changed exactly one customers row",
+          "expected": 1,
+          "actual": 1,
+          "passed": true
+        },
+        {
+          "id": "status_written",
+          "description": "Target row's status, re-read inside the same transaction",
+          "expected": "Archived",
+          "actual": "Archived",
+          "passed": true
+        },
+        {
+          "id": "version_incremented_by_one",
+          "description": "Target row's version, re-read inside the same transaction",
+          "expected": 4,
+          "actual": 4,
+          "passed": true
+        },
+        {
+          "id": "other_customers_unchanged_in_transaction",
+          "description": "Count and SHA-256 of all other rows in customers table, before vs after the UPDATE, inside the same transaction",
+          "expected": {
+            "row_count": 7,
+            "sha256": "710dc4ca9dce6e0fafef569096b04b5b397a88736d0da8f8345a3646f5794dff"
+          },
+          "actual": {
+            "row_count": 7,
+            "sha256": "710dc4ca9dce6e0fafef569096b04b5b397a88736d0da8f8345a3646f5794dff"
+          },
+          "passed": true
+        }
+      ]
+    },
+    "evidence": null,
+    "recovery_verification": null,
+    "approval": {
+      "decision": "approved",
+      "role": "approver",
+      "at": "2026-10-22T12:00:13+00:00",
+      "note": "Checked the account history"
+    },
+    "recovered_at": null,
+    "undo_available": true,
+    "undo_disabled_reason": null
+  },
+  "error": null
+}
+```
+
+#### Approve it again
+
+```http
+POST /api/actions/00000000-0000-4000-8000-000000000012/approve
+X-Role: approver
+X-Role-Key: demo-approver-key
+```
+
+Response `409`:
+
+```json
+{
+  "data": null,
+  "error": {
+    "code": "not_pending",
+    "message": "Only pending_approval actions can be approved or rejected",
+    "details": {
+      "action_id": "00000000-0000-4000-8000-000000000012",
+      "status": "executed"
+    }
+  }
+}
+```
+
+#### Reject a pending action
+
+Setup: `update_pending_approval_2` put ACC-105 in `pending_approval`.
+
+```http
+POST /api/actions/00000000-0000-4000-8000-000000000013/reject
+X-Role: approver
+X-Role-Key: demo-approver-key
+Content-Type: application/json
+
+{
+  "note": "Not this week"
+}
+```
+
+Response `200`:
+
+```json
+{
+  "data": {
+    "id": "00000000-0000-4000-8000-000000000013",
+    "created_at": "2026-10-22T12:00:14+00:00",
+    "actor": "operator",
+    "tool_name": "update_customer_status",
+    "arguments": {
+      "account_id": "ACC-105",
+      "new_status": "Archived",
+      "reason": "Inactive for 420 days",
+      "expected_version": null
+    },
+    "decision": "require_approval",
+    "rule_id": "bulk_change",
+    "reason": "Run already executed 2 changes (threshold 1)",
+    "risk": "medium",
+    "status": "denied",
+    "account_id": "ACC-105",
+    "before": {
+      "account_id": "ACC-105",
+      "name": "Kabir Mehta",
+      "phone": "+91 90000 00105",
+      "status": "Active",
+      "last_activity_at": "2025-08-28T12:00:00Z",
+      "protected": false,
+      "version": 3
+    },
+    "after": {
+      "account_id": "ACC-105",
+      "name": "Kabir Mehta",
+      "phone": "+91 90000 00105",
+      "status": "Active",
+      "last_activity_at": "2025-08-28T12:00:00Z",
+      "protected": false,
+      "version": 3
+    },
+    "before_version": 3,
+    "after_version": 3,
+    "run_id": "run-bulk",
+    "mode": null,
+    "scenario": null,
+    "undo_of_action_id": null,
+    "recovery_state": "unavailable",
+    "verification": null,
+    "evidence": null,
+    "recovery_verification": null,
+    "approval": {
+      "decision": "rejected",
+      "role": "approver",
+      "at": "2026-10-22T12:00:15+00:00",
+      "note": "Not this week"
+    },
+    "recovered_at": null,
+    "undo_available": false,
+    "undo_disabled_reason": "Action was denied; there is no change to undo"
+  },
+  "error": null
+}
+```
+
+### `GET /api/audit/export` (auditor)
+
+#### Export the audit trail
+
+The real export had 12 actions; only the first is shown.
+
+```http
+GET /api/audit/export
+X-Role: auditor
+X-Role-Key: demo-auditor-key
+```
+
+Response `200`:
+
+```json
+{
+  "data": {
+    "exported_at": "2026-10-22T12:00:16+00:00",
+    "exported_by_role": "auditor",
+    "pii_masked": true,
+    "integrity_check": "ok",
+    "action_count": 12,
+    "actions": [
+      {
+        "id": "00000000-0000-4000-8000-000000000013",
+        "run_id": "run-bulk",
+        "tool_name": "update_customer_status",
+        "arguments": {
+          "account_id": "ACC-105",
+          "new_status": "Archived",
+          "reason": "Inactive for 420 days",
+          "expected_version": null
+        },
+        "before": {
+          "account_id": "ACC-105",
+          "name": "K*** M***",
+          "phone": "+** ***** ***05",
+          "status": "Active",
+          "last_activity_at": "2025-08-28T12:00:00Z",
+          "protected": false,
+          "version": 3
+        },
+        "after": {
+          "account_id": "ACC-105",
+          "name": "K*** M***",
+          "phone": "+** ***** ***05",
+          "status": "Active",
+          "last_activity_at": "2025-08-28T12:00:00Z",
+          "protected": false,
+          "version": 3
+        },
+        "risk": "medium",
+        "status": "denied",
+        "recovery_state": "unavailable",
+        "verification": null,
+        "evidence": null,
+        "recovery_verification": null,
+        "approval": {
+          "decision": "rejected",
+          "role": "approver",
+          "at": "2026-10-22T12:00:15+00:00",
+          "note": "Not this week"
+        },
+        "created_at": "2026-10-22T12:00:14+00:00",
+        "recovered_at": null,
+        "actor": "operator",
+        "decision": "require_approval",
+        "rule_id": "bulk_change",
+        "reason": "Run already executed 2 changes (threshold 1)",
+        "account_id": "ACC-105",
+        "before_version": 3,
+        "after_version": 3,
+        "mode": null,
+        "scenario": null,
+        "undo_of_action_id": null,
+        "undo_available": false,
+        "undo_disabled_reason": "Action was denied; there is no change to undo"
+      }
+    ]
+  },
+  "error": null
+}
+```
+
+#### Export as an operator
+
+```http
+GET /api/audit/export
+X-Role: operator
+X-Role-Key: demo-operator-key
+```
+
+Response `403`:
+
+```json
+{
+  "data": null,
+  "error": {
+    "code": "role_forbidden",
+    "message": "Role operator may not do this",
+    "details": {
+      "required": [
+        "auditor"
+      ],
+      "role": "operator"
+    }
+  }
+}
+```
+
+### Role errors
+
+#### No role headers
+
+```http
+POST /api/tools/update-customer-status
+Content-Type: application/json
+
+{
+  "account_id": "ACC-105",
+  "new_status": "Archived",
+  "reason": "Cleanup"
+}
+```
+
+Response `401`:
+
+```json
+{
+  "data": null,
+  "error": {
+    "code": "role_required",
+    "message": "Send X-Role and X-Role-Key headers",
+    "details": {
+      "roles": [
+        "operator",
+        "approver",
+        "auditor"
+      ]
+    }
+  }
+}
+```
+
+#### Wrong role for the route
+
+```http
+POST /api/tools/update-customer-status
+X-Role: auditor
+X-Role-Key: demo-auditor-key
+Content-Type: application/json
+
+{
+  "account_id": "ACC-105",
+  "new_status": "Archived",
+  "reason": "Cleanup"
+}
+```
+
+Response `403`:
+
+```json
+{
+  "data": null,
+  "error": {
+    "code": "role_forbidden",
+    "message": "Role auditor may not do this",
+    "details": {
+      "required": [
+        "operator"
+      ],
+      "role": "auditor"
+    }
+  }
+}
+```
+
 ### `GET /api/actions`
 
 #### List actions
 
-The real response had 11 items; only the first (newest) is shown.
+The real response had 12 items; only the first (newest) is shown.
 
 ```http
 GET /api/actions
@@ -700,35 +1179,37 @@ Response `200`:
 {
   "data": [
     {
-      "id": "00000000-0000-4000-8000-000000000012",
-      "created_at": "2026-10-22T12:00:12+00:00",
-      "actor": "api",
+      "id": "00000000-0000-4000-8000-000000000013",
+      "created_at": "2026-10-22T12:00:14+00:00",
+      "actor": "operator",
       "tool_name": "update_customer_status",
       "arguments": {
-        "account_id": "ACC-102",
+        "account_id": "ACC-105",
         "new_status": "Archived",
-        "reason": "Inactive for 591 days",
+        "reason": "Inactive for 420 days",
         "expected_version": null
       },
       "decision": "require_approval",
       "rule_id": "bulk_change",
-      "reason": "Run already executed 1 changes (threshold 1)",
+      "reason": "Run already executed 2 changes (threshold 1)",
       "risk": "medium",
-      "status": "pending_approval",
-      "account_id": "ACC-102",
+      "status": "denied",
+      "account_id": "ACC-105",
       "before": {
-        "account_id": "ACC-102",
-        "name": "Meera Iyer",
+        "account_id": "ACC-105",
+        "name": "Kabir Mehta",
+        "phone": "+91 90000 00105",
         "status": "Active",
-        "last_activity_at": "2025-03-10T12:00:00Z",
+        "last_activity_at": "2025-08-28T12:00:00Z",
         "protected": false,
         "version": 3
       },
       "after": {
-        "account_id": "ACC-102",
-        "name": "Meera Iyer",
+        "account_id": "ACC-105",
+        "name": "Kabir Mehta",
+        "phone": "+91 90000 00105",
         "status": "Active",
-        "last_activity_at": "2025-03-10T12:00:00Z",
+        "last_activity_at": "2025-08-28T12:00:00Z",
         "protected": false,
         "version": 3
       },
@@ -742,9 +1223,15 @@ Response `200`:
       "verification": null,
       "evidence": null,
       "recovery_verification": null,
+      "approval": {
+        "decision": "rejected",
+        "role": "approver",
+        "at": "2026-10-22T12:00:15+00:00",
+        "note": "Not this week"
+      },
       "recovered_at": null,
       "undo_available": false,
-      "undo_disabled_reason": "Action was pending_approval; there is no change to undo"
+      "undo_disabled_reason": "Action was denied; there is no change to undo"
     }
   ],
   "error": null
@@ -766,7 +1253,7 @@ Response `200`:
   "data": {
     "id": "00000000-0000-4000-8000-000000000001",
     "created_at": "2026-10-22T12:00:01+00:00",
-    "actor": "api",
+    "actor": "operator",
     "tool_name": "update_customer_status",
     "arguments": {
       "account_id": "ACC-102",
@@ -783,6 +1270,7 @@ Response `200`:
     "before": {
       "account_id": "ACC-102",
       "name": "Meera Iyer",
+      "phone": "+91 90000 00102",
       "status": "Active",
       "last_activity_at": "2025-03-10T12:00:00Z",
       "protected": false,
@@ -791,6 +1279,7 @@ Response `200`:
     "after": {
       "account_id": "ACC-102",
       "name": "Meera Iyer",
+      "phone": "+91 90000 00102",
       "status": "Archived",
       "last_activity_at": "2025-03-10T12:00:00Z",
       "protected": false,
@@ -834,11 +1323,11 @@ Response `200`:
           "description": "Count and SHA-256 of all other rows in customers table, before vs after the UPDATE, inside the same transaction",
           "expected": {
             "row_count": 7,
-            "sha256": "ea60b90e07f72a4396e4987a46a5a5d8d361b9c69ba742bb661724c4876e6fbb"
+            "sha256": "9184d95c3ac112505ab19af7dd77fef0d809aa254b7f9d2636250ad1e01057f9"
           },
           "actual": {
             "row_count": 7,
-            "sha256": "ea60b90e07f72a4396e4987a46a5a5d8d361b9c69ba742bb661724c4876e6fbb"
+            "sha256": "9184d95c3ac112505ab19af7dd77fef0d809aa254b7f9d2636250ad1e01057f9"
           },
           "passed": true
         }
@@ -846,6 +1335,7 @@ Response `200`:
     },
     "evidence": null,
     "recovery_verification": null,
+    "approval": null,
     "recovered_at": null,
     "undo_available": true,
     "undo_disabled_reason": null
@@ -869,7 +1359,7 @@ Response `200`:
   "data": {
     "id": "00000000-0000-4000-8000-000000000008",
     "created_at": "2026-10-22T12:00:08+00:00",
-    "actor": "api",
+    "actor": "operator",
     "tool_name": "update_customer_status",
     "arguments": {
       "account_id": "ACC-105",
@@ -886,6 +1376,7 @@ Response `200`:
     "before": {
       "account_id": "ACC-105",
       "name": "Kabir Mehta",
+      "phone": "+91 90000 00105",
       "status": "Active",
       "last_activity_at": "2025-08-28T12:00:00Z",
       "protected": false,
@@ -894,6 +1385,7 @@ Response `200`:
     "after": {
       "account_id": "ACC-105",
       "name": "Kabir Mehta",
+      "phone": "+91 90000 00105",
       "status": "Archived",
       "last_activity_at": "2025-08-28T12:00:00Z",
       "protected": false,
@@ -937,11 +1429,11 @@ Response `200`:
           "description": "Count and SHA-256 of all other rows in customers table, before vs after the UPDATE, inside the same transaction",
           "expected": {
             "row_count": 7,
-            "sha256": "49e782a49b1366bdc712ae23a6dbb260e40d2f9cc5b5a0aeeb5a4743791cdef8"
+            "sha256": "95054919b58430d0986f710c2a8b3815a61d46ebb799335b55f408d9285e3fc5"
           },
           "actual": {
             "row_count": 7,
-            "sha256": "49e782a49b1366bdc712ae23a6dbb260e40d2f9cc5b5a0aeeb5a4743791cdef8"
+            "sha256": "95054919b58430d0986f710c2a8b3815a61d46ebb799335b55f408d9285e3fc5"
           },
           "passed": true
         }
@@ -949,6 +1441,7 @@ Response `200`:
     },
     "evidence": null,
     "recovery_verification": null,
+    "approval": null,
     "recovered_at": null,
     "undo_available": false,
     "undo_disabled_reason": "Customer changed since this action; Undo would overwrite a newer edit"
@@ -963,6 +1456,8 @@ Response `200`:
 
 ```http
 POST /api/actions/00000000-0000-4000-8000-000000000001/undo
+X-Role: operator
+X-Role-Key: demo-operator-key
 ```
 
 Response `200`:
@@ -977,6 +1472,7 @@ Response `200`:
     "before": {
       "account_id": "ACC-102",
       "name": "Meera Iyer",
+      "phone": "+91 90000 00102",
       "status": "Archived",
       "last_activity_at": "2025-03-10T12:00:00Z",
       "protected": false,
@@ -985,6 +1481,7 @@ Response `200`:
     "after": {
       "account_id": "ACC-102",
       "name": "Meera Iyer",
+      "phone": "+91 90000 00102",
       "status": "Active",
       "last_activity_at": "2025-03-10T12:00:00Z",
       "protected": false,
@@ -1042,11 +1539,11 @@ Response `200`:
           "description": "Count and SHA-256 of all other rows in customers table (excluding ACC-102): stored inside the recovery transaction just before the restore vs recomputed now",
           "expected": {
             "row_count": 7,
-            "sha256": "ea60b90e07f72a4396e4987a46a5a5d8d361b9c69ba742bb661724c4876e6fbb"
+            "sha256": "9184d95c3ac112505ab19af7dd77fef0d809aa254b7f9d2636250ad1e01057f9"
           },
           "actual": {
             "row_count": 7,
-            "sha256": "ea60b90e07f72a4396e4987a46a5a5d8d361b9c69ba742bb661724c4876e6fbb"
+            "sha256": "9184d95c3ac112505ab19af7dd77fef0d809aa254b7f9d2636250ad1e01057f9"
           },
           "passed": true
         }
@@ -1061,6 +1558,8 @@ Response `200`:
 
 ```http
 POST /api/actions/00000000-0000-4000-8000-000000000001/undo
+X-Role: operator
+X-Role-Key: demo-operator-key
 ```
 
 Response `200`:
@@ -1075,6 +1574,7 @@ Response `200`:
     "before": {
       "account_id": "ACC-102",
       "name": "Meera Iyer",
+      "phone": "+91 90000 00102",
       "status": "Archived",
       "last_activity_at": "2025-03-10T12:00:00Z",
       "protected": false,
@@ -1083,6 +1583,7 @@ Response `200`:
     "after": {
       "account_id": "ACC-102",
       "name": "Meera Iyer",
+      "phone": "+91 90000 00102",
       "status": "Active",
       "last_activity_at": "2025-03-10T12:00:00Z",
       "protected": false,
@@ -1140,11 +1641,11 @@ Response `200`:
           "description": "Count and SHA-256 of all other rows in customers table (excluding ACC-102): stored inside the recovery transaction just before the restore vs recomputed now",
           "expected": {
             "row_count": 7,
-            "sha256": "ea60b90e07f72a4396e4987a46a5a5d8d361b9c69ba742bb661724c4876e6fbb"
+            "sha256": "9184d95c3ac112505ab19af7dd77fef0d809aa254b7f9d2636250ad1e01057f9"
           },
           "actual": {
             "row_count": 7,
-            "sha256": "ea60b90e07f72a4396e4987a46a5a5d8d361b9c69ba742bb661724c4876e6fbb"
+            "sha256": "9184d95c3ac112505ab19af7dd77fef0d809aa254b7f9d2636250ad1e01057f9"
           },
           "passed": true
         }
@@ -1159,6 +1660,8 @@ Response `200`:
 
 ```http
 POST /api/actions/00000000-0000-4000-8000-000000000008/undo
+X-Role: operator
+X-Role-Key: demo-operator-key
 ```
 
 Response `409`:
@@ -1173,6 +1676,7 @@ Response `409`:
     "expected_after": {
       "account_id": "ACC-105",
       "name": "Kabir Mehta",
+      "phone": "+91 90000 00105",
       "status": "Archived",
       "last_activity_at": "2025-08-28T12:00:00Z",
       "protected": false,
@@ -1182,6 +1686,7 @@ Response `409`:
     "current_customer": {
       "account_id": "ACC-105",
       "name": "Kabir Mehta",
+      "phone": "+91 90000 00105",
       "status": "Active",
       "last_activity_at": "2025-08-28T12:00:00Z",
       "protected": false,
@@ -1270,6 +1775,8 @@ Response `409`:
 
 ```http
 POST /api/actions/00000000-0000-4000-8000-000000000003/undo
+X-Role: operator
+X-Role-Key: demo-operator-key
 ```
 
 Response `409`:
@@ -1293,6 +1800,8 @@ Response `409`:
 
 ```http
 POST /api/actions/does-not-exist/undo
+X-Role: operator
+X-Role-Key: demo-operator-key
 ```
 
 Response `404`:
@@ -1316,6 +1825,8 @@ Response `404`:
 
 ```http
 POST /api/agent/runs
+X-Role: operator
+X-Role-Key: demo-operator-key
 ```
 
 Response `501`:
@@ -1371,11 +1882,12 @@ Response `404`:
 }
 ```
 
-## Changes since the last version (Priority-0 item 4)
+## Changes since the last version (Priority-0 item 5)
 
-- **Breaking:** every response is wrapped in `{data, error}`. `GET /api/customers` and `GET /api/actions` now return their arrays under `data`.
-- **Breaking:** errors are `{data: null, error: {...}}` (was `{error: {...}}`). Policy blocks (`policy_blocked`), Undo conflicts (`undo_conflict`), and unverified writes now also set `error`.
-- New on every action: `undo_available`, `undo_disabled_reason`.
-- New: `POST /api/agent/runs` and `GET /api/runs/{run_id}/evidence` reserved (501).
-- Unknown routes and 405s use the envelope (`route_not_found`, `method_not_allowed`).
-- CORS enabled for `FRONTEND_ORIGIN` only.
+- **Breaking:** every write needs `X-Role` + `X-Role-Key` (see Roles). Reads are unchanged.
+- **Breaking:** `actor` on ledger rows is now the role (`operator`, `approver`) instead of `api`.
+- New: `POST /api/actions/{action_id}/approve`, `POST /api/actions/{action_id}/reject`, `GET /api/audit/export`.
+- New ledger status `denied`; ActionRecord gains `approval`.
+- Customers gain `phone` (synthetic). Ledger `arguments.reason` is stored with names/phones masked.
+- CORS also allows the `X-Role` and `X-Role-Key` headers.
+- Local DBs from before this change need one `POST /api/demo/reset` (as operator).
