@@ -4,6 +4,7 @@ and verifier, each comparing what it expects with what actually happened.
     python -m backend.scenarios              # from the repo root
     python backend/scenarios.py [filter]     # same thing
     python -m backend.scenarios stale --json # only names containing "stale"; JSON to stdout
+    python -m backend.scenarios --demo       # the stage story, replay only (offline backup)
 
 Every scenario starts with POST /api/demo/reset on a throwaway SQLite database, so the
 app's own database is never touched. Scenarios that deliberately break something are
@@ -526,11 +527,105 @@ def print_table(report):
           f"({totals['failed']} failed, {totals['injected_faults']} injected faults)")
 
 
+def run_demo(out=print):
+    """The stage story, offline: replay only, throwaway database, no model call.
+    Prints each step and returns True only if every step happened as the story says."""
+    all_ok = True
+
+    def step(number, title, lines, ok):
+        nonlocal all_ok
+        all_ok &= bool(ok)
+        out(f"\n[{number}] {title}  {'OK' if ok else 'UNEXPECTED'}")
+        for line in lines:
+            out(f"    {line}")
+
+    def checks(result):
+        return [f"{'PASS' if c['passed'] else 'FAIL'}  {c['id']}" for c in (result or {}).get("checks", [])]
+
+    with tempfile.TemporaryDirectory() as workdir, isolated(workdir):
+        with TestClient(main.app, headers=OPERATOR) as client:
+            out("REWIND demo - offline backup. Replay mode on a throwaway database; no model is called.")
+            reset = client.post("/api/demo/reset").json()["data"]
+            step(1, "Reset the demo", [f"{reset['summary']['total']} customers, "
+                                       f"{reset['ledger_entries']} ledger entries"],
+                 reset["ledger_entries"] == 0)
+
+            script = agent.load_replay("stale_report")
+            with env(REWIND_FAULT_DISABLE_RECENT_ACTIVITY="1"):  # injected fault, labelled in the ledger
+                run = client.post("/api/agent/runs", json={
+                    "instruction": script.instruction, "mode": "replay", "scenario": "stale_report"}).json()["data"]
+            step(2, "Agent run - REPLAY of 'stale_report' (INJECTED FAULT: recent_activity rule disabled)",
+                 [f"instruction: {script.instruction}", f"run {run['run_id']}  mode={run['mode']}  status={run['status']}",
+                  *[f"step {s['index']}: {s['tool']} -> {s['result_summary']}" for s in run["steps"]]],
+                 run["mode"] == "replay" and run["status"] == "completed")
+
+            action_id = run["action_ids"][0]
+            action = client.get(f"/api/actions/{action_id}").json()["data"]
+            target = action["account_id"]
+            changed = row("customers", target)
+            step(3, "FinCore row changed", [f"{target}: {action['before']['status']} -> {changed['status']} "
+                                            f"(version {changed['version']})"], changed["status"] == "Archived")
+            step(4, "Ledger entry", [
+                f"action {action_id}", f"status={action['status']}  actor={action['actor']}  "
+                f"mode={action['mode']}  scenario={action['scenario']}",
+                f"policy: {action['decision']} ({action['rule_id']}) - {action['reason']}"],
+                action["status"] == "executed" and action["scenario"] == "injected_fault")
+            post_check = action["post_action_check"] or {}
+            step(5, "REWIND detects the error: post-action eligibility check",
+                 [f"verdict={post_check.get('verdict')}  flag={action['flag']}", *checks(post_check)],
+                 action["flag"] == "flagged_unsafe")
+
+            undo = client.post(f"/api/actions/{action_id}/undo").json()["data"]
+            step(6, "Undo", [f"status={undo['status']}  verdict={undo['verification']['verdict']}",
+                             *checks(undo["verification"])], undo["verification"]["verdict"] == "verified")
+
+            evidence = client.get(f"/api/runs/{run['run_id']}/evidence").json()["data"]
+            attempt = evidence["actions"][0]["recovery"]["attempts"][0]
+            final = evidence["final_state"][f"customers/{target}"]
+            step(7, "Verified evidence (GET /api/runs/{run_id}/evidence)", [
+                f"instruction: {evidence['instruction']}",
+                f"recovery attempt {attempt['undo_action_id']}: {attempt['verification']['verdict']}",
+                f"final state: {target} {final['status']} (version {final['version']})"],
+                attempt["verification"]["verdict"] == "verified" and final["status"] == "Active")
+
+            other = accounts("moderately inactive")[0]
+            archived = client.post(STATUS, json=status_body(other, "Archived", "Inactive 150 days")).json()["data"]
+            _, ops = gateway.execute("update_customer_status",
+                                     status_body(other, "Active", "Customer phoned; reactivated"), actor="ops_user")
+            response = client.post(f"/api/actions/{archived['action_id']}/undo")
+            refused = response.json()["data"]
+            now_row = row("customers", other)
+            step(8, "Second scenario: ops_user edits after the archive, then Undo", [
+                f"archive {other}: {archived['status']}",
+                f"ops_user sets {other} Active: {ops['data']['status']}",
+                f"Undo -> HTTP {response.status_code} {refused['status']}; differences: "
+                f"{', '.join(sorted(refused['differences']))}",
+                f"{other} is still {now_row['status']} (version {now_row['version']}): the newer edit is intact"],
+                response.status_code == 409 and refused["status"] == "conflict_detected"
+                and now_row["status"] == "Active")
+
+    out(f"\nDemo story {'completed as expected' if all_ok else 'had UNEXPECTED steps'}.")
+    return all_ok
+
+
+def run_demo_safely(out=print):
+    """For the CLI: a step that cannot even run is reported, not shown as a traceback."""
+    try:
+        return run_demo(out)
+    except Exception as exc:
+        out(f"\nDemo story STOPPED UNEXPECTEDLY: {type(exc).__name__}: {exc}")
+        return False
+
+
 def cli(argv=None):
     parser = argparse.ArgumentParser(description="Run the REWIND scenario lab.")
     parser.add_argument("filter", nargs="?", help="only scenarios whose name contains this")
     parser.add_argument("--json", action="store_true", help="print the JSON report instead of the table")
+    parser.add_argument("--demo", action="store_true",
+                        help="print the stage demo story, replay only (offline backup)")
     args = parser.parse_args(argv)
+    if args.demo:
+        return 0 if run_demo_safely() else 1
     report = build_report(run_all(args.filter), args.filter)
     path = save_report(report)
     if args.json:

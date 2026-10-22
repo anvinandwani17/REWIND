@@ -51,6 +51,26 @@ def test_report_totals_and_save(tmp_path):
     assert json.loads(path.read_text(encoding="utf-8"))["scenarios"][0]["name"] == "double_undo"
 
 
+def test_offline_demo_story_runs_in_replay_and_every_step_checks_out():
+    lines = []
+    assert scenarios.run_demo(out=lines.append) is True
+    text = "\n".join(lines)
+    assert "UNEXPECTED" not in text
+    assert "mode=replay" in text and "scenario=injected_fault" in text and "mode=live" not in text
+    for expected in ("flag=flagged_unsafe", "verdict=verified", "HTTP 409 conflict_detected",
+                     "the newer edit is intact"):
+        assert expected in text
+
+
+def test_offline_demo_story_reports_a_broken_step(monkeypatch):
+    # If REWIND stopped detecting the unsafe archive, the backup must say so, not print "OK".
+    monkeypatch.setattr(verification, "post_action_check",
+                        lambda action_id: {"verdict": "eligible", "checks": []})
+    lines = []
+    assert scenarios.run_demo(out=lines.append) is False
+    assert any("REWIND detects the error" in line and "UNEXPECTED" in line for line in lines)
+
+
 def test_cli_runs_as_a_module_from_the_repo_root(tmp_path):
     report_path = tmp_path / "lab_report.json"
     completed = subprocess.run(
