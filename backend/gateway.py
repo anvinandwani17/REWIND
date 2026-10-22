@@ -9,7 +9,7 @@ import policies
 import verification
 from db import get_customer, transaction
 from ledger import count_executed_in_run, record_action
-from schemas import UpdateCustomerStatusArgs, error_body
+from schemas import UpdateCustomerStatusArgs, envelope, error_body, error_obj
 
 SUPPORTED_TOOLS = {"update_customer_status": UpdateCustomerStatusArgs}
 
@@ -20,7 +20,8 @@ def execute(tool_name, arguments, run_id=None, actor="api"):
 
     The policy runs inside the lock because it needs the before-state; checking
     it outside would let the customer change between check and write.
-    Returns (http_status, body).
+    Returns (http_status, {data, error}). Non-2xx always carries an error;
+    outcomes that were recorded (blocked, failed) also carry their data.
     """
     if tool_name not in SUPPORTED_TOOLS:
         return 400, error_body("unsupported_tool", f"Unsupported tool: {tool_name}")
@@ -83,8 +84,13 @@ def execute(tool_name, arguments, run_id=None, actor="api"):
                 reason=decision["reason"], risk=decision["risk"], status=status,
                 recovery_state="unavailable", verification=None,
             )
-            http_status = 202 if pending else (409 if decision["rule_id"] == "no_change" else 403)
-            return http_status, {**outcome, "status": status, "after": before}
+            data = {**outcome, "status": status, "after": before}
+            if pending:
+                return 202, envelope(data)
+            http_status = 409 if decision["rule_id"] == "no_change" else 403
+            return http_status, envelope(data, error_obj(
+                "policy_blocked", decision["reason"], {"rule_id": decision["rule_id"]},
+            ))
 
         if args.expected_version is not None and args.expected_version != before["version"]:
             # Nothing written: the caller acted on a stale read.
@@ -125,7 +131,7 @@ def execute(tool_name, arguments, run_id=None, actor="api"):
             recovery_state=recovery_state, verification=result,
         )
 
-    return (200 if executed else 500), {
+    data = {
         **outcome,
         "status": status,
         "reason": reason,
@@ -133,3 +139,6 @@ def execute(tool_name, arguments, run_id=None, actor="api"):
         "after": after,
         "verification": result,
     }
+    if executed:
+        return 200, envelope(data)
+    return 500, envelope(data, error_obj("write_not_verified", reason))

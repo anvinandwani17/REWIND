@@ -44,11 +44,11 @@ def archive(client, account_id, **extra):
 
 
 def customer(client, account_id):
-    return next(c for c in client.get("/api/customers").json() if c["account_id"] == account_id)
+    return next(c for c in client.get("/api/customers").json()["data"] if c["account_id"] == account_id)
 
 
 def actions(client):
-    return client.get("/api/actions").json()
+    return client.get("/api/actions").json()["data"]
 
 
 # --- startup / schema / reset -------------------------------------------------
@@ -58,7 +58,7 @@ def test_import_and_startup_never_wipe_data(client):
     importlib.reload(main)
     with TestClient(main.app) as fresh:
         assert customer(fresh, "ACC-102")["status"] == "Archived"
-        assert len(fresh.get("/api/actions").json()) == 1
+        assert len(fresh.get("/api/actions").json()["data"]) == 1
 
 
 def test_schema_init_is_idempotent_and_preserves_rows(client):
@@ -77,7 +77,7 @@ def test_schema_init_is_idempotent_and_preserves_rows(client):
 
 
 def test_customers_shape_and_fixture_roles(client):
-    customers = client.get("/api/customers").json()
+    customers = client.get("/api/customers").json()["data"]
     assert set(customers[0]) == {
         "account_id", "name", "status", "last_activity_at", "protected", "version",
     }
@@ -100,7 +100,7 @@ def test_reset_reproduces_identical_state_twice(client):
     second = client.post("/api/demo/reset")
     assert second.json() == first.json()
     assert snapshot() == state
-    assert first.json()["summary"]["total"] == 8
+    assert first.json()["data"]["summary"]["total"] == 8
 
 
 def test_reset_refused_when_demo_mode_off(client, monkeypatch):
@@ -133,7 +133,7 @@ def test_inactivity_report_explains_age(client):
 def test_authorized_update_changes_exactly_one_row(client):
     customers_before, _ = snapshot()
     response = archive(client, "ACC-102", expected_version=1)
-    body = response.json()
+    body = response.json()["data"]
     assert response.status_code == 200
     assert (body["status"], body["decision"], body["rule_id"]) == ("executed", "allow", "default_allow")
 
@@ -160,10 +160,10 @@ def test_authorized_update_changes_exactly_one_row(client):
 
 
 def test_get_action_by_id(client):
-    action_id = archive(client, "ACC-102").json()["action_id"]
+    action_id = archive(client, "ACC-102").json()["data"]["action_id"]
     response = client.get(f"/api/actions/{action_id}")
     assert response.status_code == 200
-    assert response.json() == actions(client)[0]
+    assert response.json()["data"] == actions(client)[0]
 
     missing = client.get("/api/actions/nope")
     assert missing.status_code == 404
@@ -176,7 +176,7 @@ def test_protected_customer_blocked_and_row_byte_identical(client):
     before = snapshot()[0]
     response = archive(client, "ACC-103")
     assert response.status_code == 403
-    body = response.json()
+    body = response.json()["data"]
     assert (body["status"], body["decision"], body["rule_id"]) == ("blocked", "block", "protected_customer")
 
     after, ledger_rows = snapshot()
@@ -189,7 +189,7 @@ def test_protected_customer_blocked_and_row_byte_identical(client):
 def test_noop_update_is_blocked(client):
     response = update(client, "ACC-101", "Active")
     assert response.status_code == 409
-    assert response.json()["rule_id"] == "no_change"
+    assert response.json()["data"]["rule_id"] == "no_change"
     assert customer(client, "ACC-101")["version"] == 1
 
 
@@ -197,7 +197,7 @@ def test_unknown_status_is_blocked_and_logged(client):
     before = snapshot()[0]
     response = update(client, "ACC-102", "Deleted")
     assert response.status_code == 403
-    assert response.json()["rule_id"] == "unknown_status"
+    assert response.json()["data"]["rule_id"] == "unknown_status"
     assert snapshot()[0] == before
     assert actions(client)[0]["status"] == "blocked"
 
@@ -206,8 +206,8 @@ def test_recent_activity_blocks_archiving(client):
     before = snapshot()[0]
     response = archive(client, "ACC-101")  # active 7 days ago
     assert response.status_code == 403
-    assert response.json()["rule_id"] == "recent_activity"
-    assert "7 days" in response.json()["reason"]
+    assert response.json()["data"]["rule_id"] == "recent_activity"
+    assert "7 days" in response.json()["data"]["reason"]
     assert snapshot()[0] == before
 
 
@@ -220,14 +220,14 @@ def test_injected_fault_disables_only_recent_activity_and_is_labelled(client, mo
     monkeypatch.setenv("REWIND_FAULT_DISABLE_RECENT_ACTIVITY", "1")
 
     response = archive(client, "ACC-101")
-    body = response.json()
+    body = response.json()["data"]
     assert response.status_code == 200
     assert body["scenario"] == "injected_fault"
     assert body["reason"].startswith("INJECTED FAULT")
     assert actions(client)[0]["scenario"] == "injected_fault"
 
     # Other rules still apply.
-    assert archive(client, "ACC-106").json()["rule_id"] == "protected_customer"
+    assert archive(client, "ACC-106").json()["data"]["rule_id"] == "protected_customer"
 
 
 def test_injected_fault_flag_ignored_outside_demo_mode(client, monkeypatch):
@@ -237,8 +237,8 @@ def test_injected_fault_flag_ignored_outside_demo_mode(client, monkeypatch):
 
     response = archive(client, "ACC-101")
     assert response.status_code == 403
-    assert response.json()["rule_id"] == "recent_activity"
-    assert response.json()["scenario"] is None
+    assert response.json()["data"]["rule_id"] == "recent_activity"
+    assert response.json()["data"]["scenario"] is None
 
 
 def test_bulk_changes_above_threshold_require_approval(client, monkeypatch):
@@ -248,7 +248,7 @@ def test_bulk_changes_above_threshold_require_approval(client, monkeypatch):
     before = snapshot()[0]
     response = archive(client, "ACC-105")
     assert response.status_code == 202
-    body = response.json()
+    body = response.json()["data"]
     assert (body["status"], body["decision"], body["rule_id"]) == (
         "pending_approval", "require_approval", "bulk_change")
     assert snapshot()[0] == before
@@ -329,7 +329,7 @@ def test_update_verification_failure_rolls_back_write_but_logs(client, monkeypat
 
     response = archive(client, "ACC-102")
     assert response.status_code == 500
-    assert response.json()["status"] == "failed"
+    assert response.json()["data"]["status"] == "failed"
     assert customer(client, "ACC-102")["status"] == "Active"
     assert customer(client, "ACC-102")["version"] == 1
     [action] = actions(client)
@@ -351,9 +351,9 @@ def undo_rows(client, action_id):
 
 
 def test_undo_restores_and_bumps_version(client):
-    action_id = archive(client, "ACC-102").json()["action_id"]
+    action_id = archive(client, "ACC-102").json()["data"]["action_id"]
     response = undo(client, action_id)
-    body = response.json()
+    body = response.json()["data"]
     assert response.status_code == 200
     assert (body["status"], body["already_recovered"]) == ("recovered", False)
     assert body["verification"]["verdict"] == "verified"
@@ -374,29 +374,29 @@ def test_undo_restores_and_bumps_version(client):
     assert (row["before_version"], row["after_version"]) == (2, 3)
     assert row["account_id"] == "ACC-102"
 
-    original = client.get(f"/api/actions/{action_id}").json()
+    original = client.get(f"/api/actions/{action_id}").json()["data"]
     assert original["recovery_state"] == "recovered"
     assert original["recovered_at"] is not None
     # The original's own forward verification is preserved.
     assert original["verification"]["stage"] == "pre_commit_guard"
     # The undo verdict is persisted and exposed on both rows.
     assert original["recovery_verification"] == body["verification"]
-    assert client.get(f"/api/actions/{body['undo_action_id']}").json()["verification"] == body["verification"]
+    assert client.get(f"/api/actions/{body['undo_action_id']}").json()["data"]["verification"] == body["verification"]
 
 
 def test_undo_after_second_actor_edit_conflicts_and_keeps_newer_edit(client):
-    action_id = archive(client, "ACC-102").json()["action_id"]
+    action_id = archive(client, "ACC-102").json()["data"]["action_id"]
     status, ops = gateway.execute(
         "update_customer_status",
         {"account_id": "ACC-102", "new_status": "Active", "reason": "customer called back"},
         actor="ops_user",
     )
-    assert (status, ops["status"]) == (200, "executed")
+    assert (status, ops["data"]["status"]) == (200, "executed")
     newer = customer(client, "ACC-102")
     assert newer["version"] == 3
 
     response = undo(client, action_id)
-    body = response.json()
+    body = response.json()["data"]
     assert response.status_code == 409
     assert body["status"] == "conflict_detected"
     assert body["expected_version"] == 2
@@ -416,11 +416,11 @@ def test_undo_after_second_actor_edit_conflicts_and_keeps_newer_edit(client):
     assert attempt["verification"] == body["verification"]
     ops_row = next(a for a in actions(client) if a["actor"] == "ops_user")
     assert ops_row["status"] == "executed"
-    assert client.get(f"/api/actions/{action_id}").json()["recovery_state"] == "conflict_detected"
+    assert client.get(f"/api/actions/{action_id}").json()["data"]["recovery_state"] == "conflict_detected"
 
 
 def test_undo_conflict_reports_changed_fields(client):
-    action_id = archive(client, "ACC-102").json()["action_id"]
+    action_id = archive(client, "ACC-102").json()["data"]["action_id"]
     with db.transaction() as conn:
         conn.execute(
             "UPDATE customers SET name = 'Edited', version = version + 1"
@@ -429,26 +429,26 @@ def test_undo_conflict_reports_changed_fields(client):
 
     response = undo(client, action_id)
     assert response.status_code == 409
-    assert set(response.json()["differences"]) == {"name", "version"}
+    assert set(response.json()["data"]["differences"]) == {"name", "version"}
     current = customer(client, "ACC-102")
     assert (current["name"], current["status"], current["version"]) == ("Edited", "Archived", 3)
 
 
 def test_double_undo_is_harmless(client):
-    action_id = archive(client, "ACC-102").json()["action_id"]
-    first = undo(client, action_id).json()
+    action_id = archive(client, "ACC-102").json()["data"]["action_id"]
+    first = undo(client, action_id).json()["data"]
     state = snapshot()
 
     second = undo(client, action_id)
     assert second.status_code == 200
-    assert second.json() == {**first, "already_recovered": True}
+    assert second.json()["data"] == {**first, "already_recovered": True}
     assert snapshot() == state
     assert customer(client, "ACC-102")["version"] == 3
     assert len(undo_rows(client, action_id)) == 1
 
 
 def test_undo_of_blocked_action_is_refused(client):
-    action_id = archive(client, "ACC-103").json()["action_id"]  # protected -> blocked
+    action_id = archive(client, "ACC-103").json()["data"]["action_id"]  # protected -> blocked
     before = snapshot()
     response = undo(client, action_id)
     assert response.status_code == 409
@@ -459,16 +459,16 @@ def test_undo_of_blocked_action_is_refused(client):
 
 
 def test_undo_of_an_undo_is_refused(client):
-    action_id = archive(client, "ACC-102").json()["action_id"]
-    undo_id = undo(client, action_id).json()["undo_action_id"]
+    action_id = archive(client, "ACC-102").json()["data"]["action_id"]
+    undo_id = undo(client, action_id).json()["data"]["undo_action_id"]
     response = undo(client, undo_id)
     assert response.status_code == 409
     assert response.json()["error"]["details"]["tool"] == "undo"
 
 
 def test_undo_works_for_two_customers_in_one_session(client):
-    first = archive(client, "ACC-102").json()["action_id"]
-    second = archive(client, "ACC-105").json()["action_id"]
+    first = archive(client, "ACC-102").json()["data"]["action_id"]
+    second = archive(client, "ACC-105").json()["data"]["action_id"]
     untouched = customer(client, "ACC-108")
 
     assert undo(client, second).status_code == 200
@@ -487,15 +487,15 @@ def test_undo_unknown_action_returns_error_object(client):
 def test_failed_restore_verification_rolls_back_restore(client, monkeypatch):
     import verification
     real_guard_restore = verification.guard_restore
-    action_id = archive(client, "ACC-102").json()["action_id"]
+    action_id = archive(client, "ACC-102").json()["data"]["action_id"]
     monkeypatch.setattr(verification, "guard_restore", failed_check)
 
     response = undo(client, action_id)
     assert response.status_code == 500
-    assert response.json()["status"] == "failed"
+    assert response.json()["data"]["status"] == "failed"
     assert customer(client, "ACC-102")["status"] == "Archived"
     assert customer(client, "ACC-102")["version"] == 2
-    original = client.get(f"/api/actions/{action_id}").json()
+    original = client.get(f"/api/actions/{action_id}").json()["data"]
     assert original["recovery_state"] == "restore_failed"
     assert original["recovery_verification"]["verdict"] == "failed"
     assert original["recovered_at"] is None
@@ -513,8 +513,8 @@ import verification as verifier
 
 
 def recovered(client, account_id="ACC-102"):
-    action_id = archive(client, account_id).json()["action_id"]
-    body = undo(client, action_id).json()
+    action_id = archive(client, account_id).json()["data"]["action_id"]
+    body = undo(client, action_id).json()["data"]
     assert body["verification"]["verdict"] == "verified"
     return action_id, body["undo_action_id"]
 
@@ -532,7 +532,7 @@ def test_tampering_with_another_customer_after_restore_fails(client):
     assert result["verdict"] == "failed"
     assert failed_ids(result) == {"unrelated_rows_unchanged"}
     # Persisted: the API now reports failed, and a repeat Undo is not a 200.
-    assert client.get(f"/api/actions/{action_id}").json()["recovery_verification"]["verdict"] == "failed"
+    assert client.get(f"/api/actions/{action_id}").json()["data"]["recovery_verification"]["verdict"] == "failed"
     assert undo(client, action_id).status_code == 500
 
 
@@ -589,7 +589,7 @@ def test_missing_or_unreadable_snapshot_is_never_verified(client, evidence_json)
 
 
 def test_tampering_between_commit_and_verifier_makes_undo_response_unverified(client, monkeypatch):
-    action_id = archive(client, "ACC-102").json()["action_id"]
+    action_id = archive(client, "ACC-102").json()["data"]["action_id"]
     real_verify_undo = verifier.verify_undo
 
     def tamper_then_verify(undo_id):
@@ -600,8 +600,8 @@ def test_tampering_between_commit_and_verifier_makes_undo_response_unverified(cl
     monkeypatch.setattr(verifier, "verify_undo", tamper_then_verify)
     response = undo(client, action_id)
     assert response.status_code == 500
-    assert response.json()["status"] == "recovered"
-    assert response.json()["verification"]["verdict"] == "failed"
+    assert response.json()["data"]["status"] == "recovered"
+    assert response.json()["data"]["verification"]["verdict"] == "failed"
 
 
 def test_every_listed_check_compares_shown_evidence(client):

@@ -1,7 +1,9 @@
 from enum import Enum
-from typing import Any
+from typing import Any, Generic, TypeVar
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictInt, StrictStr
+
+T = TypeVar("T")
 
 
 class CustomerStatus(str, Enum):
@@ -43,14 +45,23 @@ class ErrorDetail(BaseModel):
     details: Any = None
 
 
-class ErrorResponse(BaseModel):
-    error: ErrorDetail
+class Envelope(BaseModel, Generic[T]):
+    """Every response: {data, error}. error is null exactly when the status is 2xx."""
+    data: T | None = None
+    error: ErrorDetail | None = None
+
+
+def envelope(data=None, error=None):
+    return {"data": data, "error": error}
+
+
+def error_obj(code, message, details=None):
+    return ErrorDetail(code=code, message=message, details=details).model_dump()
 
 
 def error_body(code, message, details=None):
-    return ErrorResponse(
-        error=ErrorDetail(code=code, message=message, details=details)
-    ).model_dump()
+    """Envelope for a pure error (no data)."""
+    return envelope(error=error_obj(code, message, details))
 
 
 class ActionRecord(BaseModel):
@@ -79,3 +90,6 @@ class ActionRecord(BaseModel):
     evidence: dict[str, Any] | None
     recovery_verification: dict[str, Any] | None
     recovered_at: str | None
+    # Derived at read time from the same rules recovery.undo() uses.
+    undo_available: bool
+    undo_disabled_reason: str | None

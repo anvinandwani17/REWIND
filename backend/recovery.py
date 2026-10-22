@@ -2,11 +2,38 @@
 from uuid import uuid4
 
 import verification
-from db import connect, get_customer, transaction
+from db import connect, get_customer, list_customers, transaction
 from ledger import get_action, get_executed_undo, now, record_action, set_recovery_state
-from schemas import error_body
+from schemas import envelope, error_body, error_obj
 
 UNDOABLE_TOOL = "update_customer_status"
+CONFLICT_REASON = "Customer changed since this action; Undo would overwrite a newer edit"
+
+
+def undo_eligibility(action, current):
+    """The single definition of when Undo may run. Returns (available, reason, code)."""
+    if action["tool_name"] == "undo":
+        return False, "This is an Undo record; undoing an Undo is not supported", "not_undoable"
+    if action["tool_name"] != UNDOABLE_TOOL:
+        return False, f"Only {UNDOABLE_TOOL} actions can be undone", "not_undoable"
+    if action["status"] != "executed":
+        return False, f"Action was {action['status']}; there is no change to undo", "not_undoable"
+    if action["recovery_state"] == "recovered":
+        return False, "Already undone", "already_recovered"
+    if (current is None or current != action["after"]
+            or current["version"] != action["after_version"]):
+        return False, CONFLICT_REASON, "conflict"
+    return True, None, None
+
+
+def with_undo_fields(db, actions):
+    """Add undo_available / undo_disabled_reason, evaluated against current customers."""
+    customers = {c["account_id"]: c for c in list_customers(db)}
+    for action in actions:
+        available, reason, _ = undo_eligibility(action, customers.get(action["account_id"]))
+        action["undo_available"] = available
+        action["undo_disabled_reason"] = reason
+    return actions
 
 
 def _differences(expected, current):
@@ -19,13 +46,9 @@ def _differences(expected, current):
     }
 
 
-def _verified(undo_row):
-    return (undo_row["verification"] or {}).get("verdict") == "verified"
-
-
-def _recovered_body(action_id, undo_row, already_recovered):
+def _recovered(action_id, undo_row, already_recovered):
     # Built from the stored undo row, so a repeat call returns the same result.
-    return {
+    data = {
         "action_id": action_id,
         "undo_action_id": undo_row["id"],
         "status": "recovered",
@@ -34,33 +57,39 @@ def _recovered_body(action_id, undo_row, already_recovered):
         "after": undo_row["after"],
         "verification": undo_row["verification"],
     }
+    if (undo_row["verification"] or {}).get("verdict") == "verified":
+        return 200, envelope(data)
+    return 500, envelope(data, error_obj(
+        "recovery_not_verified",
+        "The restore was committed but the post-commit verifier did not verify it",
+    ))
 
 
 def undo(action_id, actor="api"):
     """Compare, restore and write the undo ledger row in one BEGIN IMMEDIATE
     transaction; then verify the committed result on a new connection.
 
-    Returns (http_status, body). 200 only when the post-commit verdict is
-    "verified"; a committed restore that fails verification returns 500.
+    Returns (http_status, {data, error}). 200 only when the post-commit verdict
+    is "verified"; a committed restore that fails verification returns 500.
     """
     with transaction() as db:
         action = get_action(db, action_id)
         if action is None:
             return 404, error_body("action_not_found", "Action not found", {"action_id": action_id})
 
-        if action["recovery_state"] == "recovered":
-            undo_row = get_executed_undo(db, action_id)
-            return (200 if _verified(undo_row) else 500), _recovered_body(action_id, undo_row, True)
+        current = get_customer(db, action["account_id"]) if action["account_id"] else None
+        _, reason, code = undo_eligibility(action, current)
 
-        if action["status"] != "executed" or action["tool_name"] != UNDOABLE_TOOL:
+        if code == "already_recovered":
+            return _recovered(action_id, get_executed_undo(db, action_id), True)
+
+        if code == "not_undoable":
             return 409, error_body(
-                "not_undoable",
-                f"Only executed {UNDOABLE_TOOL} actions can be undone",
+                "not_undoable", reason,
                 {"action_id": action_id, "status": action["status"], "tool": action["tool_name"]},
             )
 
         expected = action["after"]
-        current = get_customer(db, action["account_id"])
         undo_id = str(uuid4())
         common = {
             "action_id": undo_id, "tool": "undo", "args": {"action_id": action_id},
@@ -69,8 +98,7 @@ def undo(action_id, actor="api"):
         }
 
         # A newer edit must never be overwritten by Undo.
-        if (current is None or current != expected
-                or current["version"] != action["after_version"]):
+        if code == "conflict":
             outcome = "conflict"
             evidence = {
                 "expected_after": expected,
@@ -78,7 +106,6 @@ def undo(action_id, actor="api"):
                 "current_customer": current,
                 "differences": _differences(expected, current),
             }
-            reason = "Customer changed since the action; Undo would overwrite a newer edit"
             record_action(
                 db, **common, after=current, decision="block", rule_id="undo_conflict",
                 reason=reason, status="conflict_detected", evidence=evidence,
@@ -122,17 +149,19 @@ def undo(action_id, actor="api"):
     result = verification.verify_undo(undo_id)
 
     if outcome == "conflict":
-        return 409, {
-            "action_id": action_id, "undo_action_id": undo_id,
-            "status": "conflict_detected", "reason": reason, **evidence,
-            "verification": result,
-        }
+        return 409, envelope(
+            {"action_id": action_id, "undo_action_id": undo_id,
+             "status": "conflict_detected", "reason": reason, **evidence,
+             "verification": result},
+            error_obj("undo_conflict", reason, {"differences": evidence["differences"]}),
+        )
     if outcome == "failed":
-        return 500, {
-            "action_id": action_id, "undo_action_id": undo_id, "status": "failed",
-            "reason": reason, "current_customer": after, "pre_commit_guard": guard,
-            "verification": result,
-        }
+        return 500, envelope(
+            {"action_id": action_id, "undo_action_id": undo_id, "status": "failed",
+             "reason": reason, "current_customer": after, "pre_commit_guard": guard,
+             "verification": result},
+            error_obj("restore_failed", reason),
+        )
     with connect() as db:
         undo_row = get_action(db, undo_id)
-    return (200 if _verified(undo_row) else 500), _recovered_body(action_id, undo_row, False)
+    return _recovered(action_id, undo_row, False)
